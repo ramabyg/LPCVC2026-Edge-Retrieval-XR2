@@ -1,6 +1,9 @@
+import sys
 import torch
 import os
-from qai_hub_models.models.openai_clip.model import OpenAIClip
+
+sys.path.insert(0, "clip_model")
+import clip as clip_lib
 
 # --- Configuration for File Saving ---
 ONNX_DIR = "exported_onnx"
@@ -20,13 +23,10 @@ DUMMY_IMAGE_INPUT = torch.rand(1, 3, 224, 224, dtype=torch.float32, device=devic
 DUMMY_TEXT_INPUT = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=device)
 
 # -----------------------------
-# 3. Load OpenAIClip wrapper and define encoders
+# 3. Load CLIP model from local clip_model module
 # -----------------------------
-print("Loading OpenAIClip wrapper model...")
-clip_wrapper_model = OpenAIClip.from_pretrained().to(device)
-clip_wrapper_model.eval()
-
-clip_model = clip_wrapper_model.clip.to(device)
+print("Loading CLIP model from clip_model...")
+clip_model, _ = clip_lib.load("ViT-B/16", device=device)
 clip_model = clip_model.to(torch.float32) # convert all model params to float32 type, consistent with input type in compiling and profiling via AIHub
 clip_model.eval()
 
