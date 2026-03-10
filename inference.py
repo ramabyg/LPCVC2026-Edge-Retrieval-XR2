@@ -90,12 +90,12 @@ device = qai_hub.Device("XR2 Gen 2 (Proxy)")
 # TODO: Define tasks with their corresponding compiled job IDs and dataset IDs
 tasks = {
     "text": {
-        "compiled_id": "",
-        "dataset_id": ""
+        "compiled_id": "jpx1jer9g",
+        "dataset_id": "d9vpdwjz9"
     },
     "image": {
-        "compiled_id": "",
-        "dataset_id": ""
+        "compiled_id": "jp4woj4lg",
+        "dataset_id": "d26gpnrg9"
     }
 }
 
@@ -125,5 +125,5 @@ for task_name, info in tasks.items():
 text_output = outputs["text"]
 image_output = outputs["image"]
 
-result = evaluate_track1(image_output, text_output, "dataset/txt_list.csv", "dataset/img_list.csv")
+result = evaluate_track1(image_output, text_output, "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\txt_list.csv", "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\img_list.csv")
 print(result)

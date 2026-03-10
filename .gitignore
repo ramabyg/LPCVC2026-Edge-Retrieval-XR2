@@ -1,3 +1,4 @@
 exported_onnx/
 dataset/
 ids.txt
+.venv
