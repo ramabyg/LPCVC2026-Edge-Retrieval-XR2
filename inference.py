@@ -82,48 +82,47 @@ def evaluate_track1(img_output, txt_output, txt_list, img_list, k=10):
 
     return np.mean(recalls)
 
-#Define target device
-device = qai_hub.Device("XR2 Gen 2 (Proxy)")
+if __name__ == "__main__":
+    # Define target device
+    device = qai_hub.Device("XR2 Gen 2 (Proxy)")
 
-
-
-# TODO: Define tasks with their corresponding compiled job IDs and dataset IDs
-tasks = {
-    "text": {
-        "compiled_id": "jgov07715",
-        "dataset_id": "d70krkm59"
-    },
-    "image": {
-        "compiled_id": "jp2m6qz65",
-        "dataset_id": "d2ne8er12"
+    # TODO: Define tasks with their corresponding compiled job IDs and dataset IDs
+    tasks = {
+        "text": {
+            "compiled_id": "jgov07715",
+            "dataset_id": "d70krkm59"
+        },
+        "image": {
+            "compiled_id": "jp2m6qz65",
+            "dataset_id": "d2ne8er12"
+        }
     }
-}
 
-# Dictionary to store outputs separately
-outputs = {}
+    # Dictionary to store outputs separately
+    outputs = {}
 
-for task_name, info in tasks.items():
-    compiled_id = info["compiled_id"]
-    input_dataset = qai_hub.get_dataset(info["dataset_id"])
+    for task_name, info in tasks.items():
+        compiled_id = info["compiled_id"]
+        input_dataset = qai_hub.get_dataset(info["dataset_id"])
 
-    # Retrieve the compiled model
-    job = qai_hub.get_job(compiled_id)
-    compiled_model = job.get_target_model()
+        # Retrieve the compiled model
+        job = qai_hub.get_job(compiled_id)
+        compiled_model = job.get_target_model()
 
-    # Run inference
-    print(f"Running inference for {task_name} model {compiled_model.model_id} on device {device.name}")
-    inference_id = run_inference(compiled_model, device, input_dataset)
-    inference_job = qai_hub.get_job(inference_id)
+        # Run inference
+        print(f"Running inference for {task_name} model {compiled_model.model_id} on device {device.name}")
+        inference_id = run_inference(compiled_model, device, input_dataset)
+        inference_job = qai_hub.get_job(inference_id)
 
-    if inference_job.get_status().failure:
-        print(f"{task_name.capitalize()} inference failed")
-        outputs[task_name] = None
-    else:
-        inference_output = inference_job.download_output_data()
-        outputs[task_name] = inference_output['output_0']
+        if inference_job.get_status().failure:
+            print(f"{task_name.capitalize()} inference failed")
+            outputs[task_name] = None
+        else:
+            inference_output = inference_job.download_output_data()
+            outputs[task_name] = inference_output['output_0']
 
-text_output = outputs["text"]
-image_output = outputs["image"]
+    text_output = outputs["text"]
+    image_output = outputs["image"]
 
-result = evaluate_track1(image_output, text_output, "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\txt_list.csv", "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\img_list.csv")
-print(result)
+    result = evaluate_track1(image_output, text_output, "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\txt_list.csv", "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\img_list.csv")
+    print(result)

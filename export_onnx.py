@@ -34,8 +34,12 @@ class ImageEncoderWrapper(torch.nn.Module):
     def __init__(self, clip_model):
         super().__init__()
         self.visual = clip_model.visual
+        # CLIP-specific normalization baked in — competition inputs are /255 only
+        self.register_buffer('mean', torch.tensor([0.48145466, 0.4578275, 0.40821073]).reshape(1, 3, 1, 1))
+        self.register_buffer('std',  torch.tensor([0.26862954, 0.26130258, 0.27577711]).reshape(1, 3, 1, 1))
 
     def forward(self, images):
+        images = (images - self.mean) / self.std
         return self.visual(images)
 
 class TextEncoderWrapper(torch.nn.Module):
