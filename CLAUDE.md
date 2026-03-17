@@ -21,7 +21,8 @@ Recall@10: for each image, check if its ground-truth text appears in the top-10 
 | ViT-B/16 FP32 (no norm baked) | 26.3 | 4.6 | ~31ms | Old baseline |
 | ViT-B/16 FP32 (norm baked) | ~26.3 | 4.6 | ~31ms | **Current — norm fix applied** |
 
-Already under 35ms with ViT-B/16 FP32 → primary goal is **maximizing Recall@10**, not shrinking the model.
+- Already under 35ms with ViT-B/16 FP32 → primary goal is **maximizing Recall@10**, not shrinking the model.
+- Recall@10 for sample image data set is 0.8805
 
 ## Pipeline (5 steps)
 

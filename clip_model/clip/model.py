@@ -180,11 +180,14 @@ class ResidualAttentionBlock(nn.Module):
             ("c_proj", nn.Linear(d_model * 4, d_model))
         ]))
         self.ln_2 = LayerNorm(d_model)
-        self.attn_mask = attn_mask
+        if attn_mask is not None:
+            self.register_buffer('attn_mask', attn_mask)
+        else:
+            self.attn_mask = None
 
     def attention(self, x: torch.Tensor):
-        self.attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
-        return self.attn(x, x, x, need_weights=False, attn_mask=self.attn_mask)[0]
+        attn_mask = self.attn_mask.to(dtype=x.dtype, device=x.device) if self.attn_mask is not None else None
+        return self.attn(x, x, x, need_weights=False, attn_mask=attn_mask)[0]
 
     def forward(self, x: torch.Tensor):
         x = x + self.attention(self.ln_1(x))
@@ -432,5 +435,5 @@ def build_model(state_dict: dict):
             del state_dict[key]
 
     convert_weights(model)
-    model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict, strict=False)  # strict=False: attn_mask buffers not in checkpoint, initialized in __init__
     return model.eval()

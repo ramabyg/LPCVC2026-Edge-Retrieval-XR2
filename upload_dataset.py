@@ -1,35 +1,36 @@
+import sys
 import pandas as pd
-from transformers import CLIPTokenizer
-import torch
 import numpy as np
 import os
 import qai_hub
 from PIL import Image
+from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, InterpolationMode
 
-def process_image(image_path, target_size=(224, 224)):
-    """Loads and processes an image to the required input shape (C, H, W)."""
-    image = Image.open(image_path).convert('RGB').resize(target_size)
-    image_array = np.array(image, dtype=np.float32) / 255.0  # Normalize
-    return np.transpose(image_array, (2, 0, 1))[np.newaxis, :]  # Convert to (1, C, H, W)
+sys.path.insert(0, "clip_model")
+import clip as clip_lib
 
-def load_images_from_folder(folder_path, target_size=(224, 224)):
-    """Loads and processes all images in a folder, sorted by name."""
-    image_paths = sorted([
-        os.path.join(folder_path, f) for f in os.listdir(folder_path)
-        if f.lower().endswith(('.jpg', '.png', '.jpeg', '.webp'))
-    ])
-    return [process_image(path, target_size) for path in image_paths]
+# Competition-style preprocessing: matches inference_local.py exactly
+preprocess = Compose([
+    Resize(224, interpolation=InterpolationMode.BICUBIC),
+    CenterCrop(224),
+    ToTensor(),  # uint8 HWC → float32 CHW, divides by 255
+])
 
-# TODO: Define image folder path
-image_folder = "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\images"  # change to your folder
+def process_image(image_path):
+    """Loads and processes an image to competition format: float32 (1, C, H, W), values in [0, 1]."""
+    img = preprocess(Image.open(image_path).convert("RGB"))  # [3, 224, 224]
+    return img.numpy()[np.newaxis, :]  # [1, 3, 224, 224]
 
-# Process images
-input_image = load_images_from_folder(image_folder)
-print(len(input_image))
+image_folder = "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\images"
+img_list_csv = "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\img_list.csv"
 
-# Check dataset properties
+# Load images in img_list.csv row order — must match evaluate_track1() expectations
+df_img = pd.read_csv(img_list_csv)
+image_filenames = df_img.iloc[:, 0].tolist()
+input_image = [process_image(os.path.join(image_folder, f)) for f in image_filenames]
 print(f"Processed {len(input_image)} images.")
 print(f"First image shape: {input_image[0].shape}")  # Should be (1, 3, 224, 224)
+print(f"First 3 filenames: {image_filenames[:3]}")  # Verify CSV order
 
 # Upload dataset
 print(qai_hub.upload_dataset({"image": input_image}))
@@ -41,20 +42,11 @@ df = pd.read_csv(csv_path)
 # Get unique text prompts in order from the second column, drop NaN
 prompts = df.iloc[:, 1].dropna().tolist()
 
-# Load CLIP tokenizer
-tokenizer = CLIPTokenizer.from_pretrained("openai/clip-vit-base-patch32")
-
-# Tokenize prompts into numpy arrays of shape (1, 77) and dtype int32
+# Tokenize using OpenAI CLIP tokenizer — matches inference_local.py
 tokenized_texts = []
 for prompt in prompts:
-    tokens = tokenizer(
-        prompt,
-        padding="max_length",
-        truncation=True,
-        max_length=77,
-        return_tensors="pt"
-    )["input_ids"].to(torch.int32)  # torch tensor [1, 77], int32
-    tokenized_texts.append(tokens.numpy())  # convert to numpy array
+    tokens = clip_lib.tokenize([prompt])  # int64 tensor [1, 77]
+    tokenized_texts.append(tokens.numpy().astype(np.int32))  # int32 for QAI Hub
 
 # Example: check first element
 print(tokenized_texts[0].shape)  # (1, 77)
