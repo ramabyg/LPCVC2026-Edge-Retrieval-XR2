@@ -3,7 +3,7 @@ Local INT8 Static Quantization for CLIP encoders using ONNXRuntime.
 
 Steps:
   1. Build calibration datasets from sample images/text
-  2. Quantize image encoder (all ops: Conv, MatMul, Gemm) — full INT8
+  2. Quantize image encoder (conservative — Conv, MatMul, Gemm only, skips Softmax + LayerNorm)
   3. Quantize text encoder (MatMul/Gemm only) — conservative, preserves accuracy
   4. Output quantized ONNX files ready for local inference or QAI Hub recompile
 
@@ -12,15 +12,22 @@ Output:
   exported_onnx/text_encoder_int8.onnx
 
 Usage:
-  python quantize_local.py                     # default: QOperator, QUInt8 activations, Percentile
-  python quantize_local.py --format qdq        # use QDQ format instead (for QAI Hub export)
-  python quantize_local.py --activation qint8  # signed int8 activations
+  python quantize_local.py                       # default: QOperator, QUInt8 activations, Percentile
+  python quantize_local.py --format qdq          # use QDQ format instead (for QAI Hub export)
+  python quantize_local.py --activation qint8    # signed int8 activations
   python quantize_local.py --calibration minmax  # MinMax calibration instead of Percentile
+  python quantize_local.py --optimize-graph      # apply transformer graph fusion before quantization
 
 Quantization format notes:
   QOperator (default) — fuses Q/DQ into ops, always outputs float32. Best for local ORT inference.
   QDQ              — inserts paired Q/DQ nodes. Designed for hardware compilers (QAI Hub, TensorRT).
                      ORT may return raw int8 output values when using QDQ, causing ~random Recall@10.
+
+Image encoder quantization notes:
+  Only Conv, MatMul, and Gemm are quantized (same conservative approach as text encoder).
+  Softmax and LayerNormalization are left in FP32 — INT8 quantization of these ops in ViT
+  corrupts attention distributions and the residual stream across all transformer layers,
+  causing catastrophic Recall@10 collapse (~0.07 observed vs 0.87 FP32 baseline).
 """
 
 import sys
@@ -105,21 +112,43 @@ class TextCalibrationReader(CalibrationDataReader):
         self._iter = iter(self._data)
 
 
-def quantize_image_encoder(quant_format, activation_type, calibrate_method):
+def maybe_optimize_graph(input_path, output_path, model_type, num_heads, hidden_size):
+    """Apply onnxruntime.transformers graph optimization (fuses attention, LayerNorm, GELU)."""
+    from onnxruntime.transformers import optimizer
+    opt = optimizer.optimize_model(
+        input_path,
+        model_type=model_type,
+        num_heads=num_heads,
+        hidden_size=hidden_size,
+    )
+    opt.save_model_to_file(output_path)
+    print(f"  Graph optimized -> {output_path}")
+
+
+def quantize_image_encoder(quant_format, activation_type, calibrate_method, optimize_graph=False):
     print("\n[Image Encoder] Preprocessing (shape inference + graph optimization)...")
     quant_pre_process(IMAGE_ONNX_PATH, IMAGE_PREP_PATH)
-    print(f"\n[Image Encoder] Quantizing (full INT8 — Conv, MatMul, Gemm) "
+
+    model_input = IMAGE_PREP_PATH
+    if optimize_graph:
+        opt_path = os.path.join(ONNX_DIR, "image_encoder_opt.onnx")
+        print("\n[Image Encoder] Applying transformer graph optimization (model_type=vit)...")
+        maybe_optimize_graph(IMAGE_PREP_PATH, opt_path, model_type="vit", num_heads=12, hidden_size=768)
+        model_input = opt_path
+
+    print(f"\n[Image Encoder] Quantizing (conservative — Conv, MatMul, Gemm; skips Softmax, LayerNorm) "
           f"[format={quant_format.name}, act={activation_type.name}, cal={calibrate_method.name}]...")
     reader = ImageCalibrationReader()
     quantize_static(
-        model_input=IMAGE_PREP_PATH,
+        model_input=model_input,
         model_output=IMAGE_INT8_PATH,
         calibration_data_reader=reader,
         quant_format=quant_format,
         weight_type=QuantType.QInt8,
         activation_type=activation_type,
         calibrate_method=calibrate_method,
-        per_channel=True,                       # per-channel weights: better accuracy for ViT
+        per_channel=True,                           # per-channel weights: better accuracy for ViT
+        op_types_to_quantize=["Conv", "MatMul", "Gemm"],  # excludes Softmax and LayerNorm
     )
     size_mb = os.path.getsize(IMAGE_INT8_PATH) / 1e6
     print(f"  Saved: {IMAGE_INT8_PATH}  ({size_mb:.1f} MB)")
@@ -172,6 +201,14 @@ if __name__ == "__main__":
             "  minmax               — captures absolute worst-case range."
         ),
     )
+    parser.add_argument(
+        "--optimize-graph", action="store_true",
+        help=(
+            "Apply onnxruntime.transformers optimizer before quantization (fuses attention, "
+            "LayerNorm, GELU subgraphs). Off by default — try this if accuracy is still poor "
+            "after the standard run."
+        ),
+    )
     args = parser.parse_args()
 
     quant_format = QuantFormat.QOperator if args.format == "qoperator" else QuantFormat.QDQ
@@ -191,7 +228,8 @@ if __name__ == "__main__":
     print(f"Config: format={quant_format.name}  activation={activation_type.name}  "
           f"calibration={calibrate_method.name}")
 
-    quantize_image_encoder(quant_format, activation_type, calibrate_method)
+    quantize_image_encoder(quant_format, activation_type, calibrate_method,
+                           optimize_graph=args.optimize_graph)
     quantize_text_encoder(quant_format, activation_type, calibrate_method)
 
     print("\n=== Quantization complete ===")
