@@ -269,3 +269,43 @@ Use `onnxruntime.quantization.qdq_loss_debug` to identify worst-performing layer
 - **Transformer optimization plan:** `working_with_claude/transformer_graph_optimization_issue_debug.md`
 - **Detailed optimization implementation plan:** `C:\Users\ursra\.claude\plans\luminous-zooming-cookie.md`
 - **Main project spec:** `CLAUDE.md`
+
+## Measured Baselines (Updated)
+
+| Variant | Recall@10 | Notes |
+|---------|-----------|-------|
+| PyTorch FP32 (local) | **0.8805** | Ground truth — `inference_local.py` |
+| FP32 ONNX (local ORT) | **0.8728** | Small gap from PIL box resize vs bicubic+centercrop |
+| INT8 ONNX — attempt 1 (QDQ + all ops) | **0.0527** | Catastrophic — raw int8 output leak |
+| INT8 ONNX — attempt 2 (QOperator, all ops) | **0.1003** | Still catastrophic — Softmax/LayerNorm poisoned |
+| **INT8 ONNX — fixed (QOperator, Conv/MatMul/Gemm only)** | **0.8256** | ✅ Production-ready |
+
+## Embedding Stats (First Sample)
+
+| Encoder | dtype | norm | min | max |
+|---------|-------|------|-----|-----|
+| FP32 image | float32 | 10.655 | -2.100 | 7.341 |
+| INT8 image (fixed) | float32 | 9.756 | -1.003 | 6.564 |
+| FP32 text | float32 | 8.953 | -1.409 | 6.441 |
+| INT8 text | float32 | 10.048 | -2.223 | 7.759 |
+
+Cosine similarity between img[0] and txt[0]:
+- FP32/FP32: 0.2565
+- INT8_img/FP32_txt: **0.2671** (slightly higher than FP32 — mild beneficial regularization)
+- FP32_img/INT8_txt: 0.2453
+
+---
+
+## Final Recall@10 Results
+
+| Config | Recall@10 | vs FP32 baseline |
+|--------|-----------|-----------------|
+| FP32 (ONNX baseline) | 0.8728 | — |
+| **INT8 (both encoders)** | **0.8256** | **-0.0472** |
+| FP32_img + INT8_txt | 0.8524 | -0.0204 |
+| INT8_img + FP32_txt | 0.8619 | -0.0109 |
+
+**Interesting:** INT8_img + FP32_txt (0.8619) > FP32_img + INT8_txt (0.8524).
+The INT8 image encoder is performing better in isolation than INT8 text encoder.
+
+---
