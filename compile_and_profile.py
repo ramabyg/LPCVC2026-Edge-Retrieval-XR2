@@ -2,6 +2,18 @@ import qai_hub
 import onnx
 import os
 import sys
+import argparse
+
+parser = argparse.ArgumentParser(description="Compile and profile CLIP encoders on QAI Hub")
+parser.add_argument(
+    "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
+    help="CLIP model variant to compile (default: ViT-B/16)",
+)
+parser.add_argument(
+    "--int8", action="store_true",
+    help="Compile INT8 QDQ ONNX models (run quantize_local.py --format qdq first)",
+)
+args = parser.parse_args()
 
 # --- Configuration ---
 ONNX_DIR = "exported_onnx"
@@ -26,13 +38,22 @@ def compile_model(model, device, input_specs):
     )
     return compile_job.job_id
 
-# Construct the full paths
-IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, "image_encoder.onnx")
-TEXT_ONNX_PATH = os.path.join(ONNX_DIR, "text_encoder.onnx")
+# Derive paths from --model (matches export_onnx.py naming convention)
+if args.model == "ViT-B/16":
+    slug = ""
+else:
+    slug = "_" + args.model.lower().replace("/", "").replace("-", "")  # "_vitl14"
 
-if not os.path.exists(ONNX_DIR):
-    print(f"Error: Directory '{ONNX_DIR}' not found. Please run 'export_onnx.py' first.")
-    sys.exit(1)
+int8_suffix = "_int8" if args.int8 else ""
+IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}{int8_suffix}.onnx")
+TEXT_ONNX_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}{int8_suffix}.onnx")
+
+for path in [IMAGE_ONNX_PATH, TEXT_ONNX_PATH]:
+    if not os.path.exists(path):
+        print(f"Error: {path} not found. Run export_onnx.py --model {args.model} first.")
+        sys.exit(1)
+
+print(f"Model: {args.model}  INT8: {args.int8}")
 
 
 # Load the ONNX models from the new location
@@ -74,8 +95,9 @@ txt_id = compile_model(
     input_specs={"text": ((1, 77), "int64")}
 )
 
-print(f"Image compilation job ID: {img_id}")
-print(f"Text compilation job ID: {txt_id}")
+print(f"\n=== Job IDs ===")
+print(f"Image compile job: {img_id}")
+print(f"Text compile  job: {txt_id}")
 
 
 # Submit profiling jobs

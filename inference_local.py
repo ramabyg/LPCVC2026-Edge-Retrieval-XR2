@@ -1,5 +1,6 @@
 import sys
 import os
+import argparse
 import torch
 import numpy as np
 import pandas as pd
@@ -11,12 +12,19 @@ import clip as clip_lib
 
 from inference import evaluate_track1
 
+parser = argparse.ArgumentParser(description="Local FP32 CLIP inference")
+parser.add_argument(
+    "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
+    help="CLIP model variant to evaluate (default: ViT-B/16)",
+)
+args = parser.parse_args()
+
 # --- Config ---
 DATA_DIR  = r"C:\rama\projects\data\lpcvc_track1_sample_data"
 IMAGE_DIR = os.path.join(DATA_DIR, "images")
 IMG_LIST  = os.path.join(DATA_DIR, "img_list.csv")
 TXT_LIST  = os.path.join(DATA_DIR, "txt_list.csv")
-MODEL     = "ViT-B/16"
+MODEL     = args.model
 # --------------
 
 device = "cuda" if torch.cuda.is_available() else "cpu"

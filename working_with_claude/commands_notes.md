@@ -63,3 +63,82 @@ Image compilation job ID: j5mwn7ewp
 Text compilation job ID: j5q76n04g
 ```
 - **0.8805059523809524** (After arranging the dataset correctly)
+
+### ViT-L/14 tests:
+
+- local run bench mark recal score: 0.90
+- On platform with fp32 recal score: 0.74285
+Analysis:
+ViT-L/14 On-Device vs Local Recall Gap — Diagnosis & Fix
+
+ Context
+
+ ViT-L/14 shows 0.90 Recall@10 locally (PyTorch) but only 0.74 on-device (QAI Hub XR2 Gen 2).
+ The gap is ~0.16 — far larger than the typical ONNX/PyTorch drift seen for ViT-B/16 (~0.008).
+ Goal: identify which pipeline layer introduces the gap and fix it.
+
+ ---
+ Root Cause Hypotheses (ranked)
+
+ H1: ONNX export quality (dynamo=True for ViT-L/14) — most likely
+
+ - dynamo=True traces the model graph; larger models can have tracing issues
+ - ViT-L/14 has 24 transformer layers, 1024 hidden dim vs 12 layers / 768 for ViT-B/16
+ - CLAUDE.md explicitly notes: "dynamo=True exports may use non-standard patterns"
+ - Diagnosis: if local ONNX FP32 recall ≈ 0.74 → this is the culprit
+
+ H2: QNN compilation / FP32 precision on XR2 Gen 2
+
+ - Some FP32 ops may run in lower precision or fall back to CPU on QNN for large models
+ - QNN compile logs may show op-level warnings/fallbacks for ViT-L/14
+ - Diagnosis: if local ONNX FP32 recall ≈ 0.90 → QNN is the culprit
+
+ H3: Image preprocessing mismatch (lower likelihood)
+
+ - upload_dataset.py uses Resize(224, BICUBIC) + CenterCrop(224) (torchvision)
+ - inference_onnx_local.py uses PIL resize((224, 224)) — bilinear, no center crop
+ - This preprocessing mismatch exists for both models, so it's not ViT-L/14-specific
+ - Wouldn't explain a ViT-L/14-specific regression
+
+ ---
+ Diagnostic Steps (must run before fixing)
+
+ Step 1 — ONNX FP32 local baseline for ViT-L/14
+
+ python inference_onnx_local.py --model ViT-L/14 --mode fp32 --inspect-embeddings
+ Interpret result:
+ - Recall ≈ 0.74 → gap exists at ONNX level → fix ONNX export (→ H1)
+ - Recall ≈ 0.90 → ONNX is fine → fix QNN compilation (→ H2)
+
+ Step 2 — Check QAI Hub compile job logs
+
+ - Visit QAI Hub console for the ViT-L/14 compile jobs
+ - Look for: fallback ops, precision downcasting warnings, unsupported op messages
+
+ ---
+ Fix Path A: ONNX Export Issue (if Step 1 gives ~0.74)
+
+ Option A1: Switch to dynamo=False for ViT-L/14
+ - File: export_onnx.py
+ - Change dynamo=True → dynamo=False for the ViT-L/14 export path
+ - dynamo=False uses TorchScript tracing — more mature for transformers
+ - Risk: may need torch.no_grad() context and explicit strict=True/False tuning
+
+ Option A2: Verify TextEncoderWrapper argmax tracing
+ - eos_index = token_ids.argmax(dim=-1) with int64 input may trace unexpectedly
+ - Verify the EOS token selection produces correct indices in the ONNX graph
+ - Use onnx.helper or Netron to inspect the exported graph node for this op
+
+ ---
+ Fix Path B: QNN Compilation Issue (if Step 1 gives ~0.90)
+
+ Option B1: Add compile options to preserve FP32 precision
+ - File: compile_and_profile.py
+ - Add --force_channel_last_output false or precision flags if QAI Hub supports them
+ - Check QAI Hub docs for FP32-preservation flags for QNN DLC
+
+ Option B2: Check QAI Hub logs for specific failing ops
+ - If certain ops fall back to CPU with wrong layout, they degrade accuracy
+ - May need to restructure ONNX graph to avoid non-accelerated ops
+
+ ---

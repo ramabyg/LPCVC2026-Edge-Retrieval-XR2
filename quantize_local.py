@@ -49,14 +49,8 @@ from onnxruntime.quantization import (
 )
 from onnxruntime.quantization.preprocess import quant_pre_process
 
-# --- Configuration ---
+# --- Configuration (set after argparse below) ---
 ONNX_DIR = "exported_onnx"
-IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, "image_encoder.onnx")
-TEXT_ONNX_PATH  = os.path.join(ONNX_DIR, "text_encoder.onnx")
-IMAGE_INT8_PATH = os.path.join(ONNX_DIR, "image_encoder_int8.onnx")
-TEXT_INT8_PATH  = os.path.join(ONNX_DIR, "text_encoder_int8.onnx")
-IMAGE_PREP_PATH = os.path.join(ONNX_DIR, "image_encoder_prep.onnx")
-TEXT_PREP_PATH  = os.path.join(ONNX_DIR, "text_encoder_prep.onnx")
 
 DATA_DIR  = r"C:\rama\projects\data\lpcvc_track1_sample_data"
 IMAGE_DIR = os.path.join(DATA_DIR, "images")
@@ -125,15 +119,18 @@ def maybe_optimize_graph(input_path, output_path, model_type, num_heads, hidden_
     print(f"  Graph optimized -> {output_path}")
 
 
-def quantize_image_encoder(quant_format, activation_type, calibrate_method, optimize_graph=False):
+def quantize_image_encoder(quant_format, activation_type, calibrate_method, optimize_graph=False,
+                           num_heads=12, hidden_size=768):
     print("\n[Image Encoder] Preprocessing (shape inference + graph optimization)...")
     quant_pre_process(IMAGE_ONNX_PATH, IMAGE_PREP_PATH)
 
     model_input = IMAGE_PREP_PATH
     if optimize_graph:
-        opt_path = os.path.join(ONNX_DIR, "image_encoder_opt.onnx")
-        print("\n[Image Encoder] Applying transformer graph optimization (model_type=vit)...")
-        maybe_optimize_graph(IMAGE_PREP_PATH, opt_path, model_type="vit", num_heads=12, hidden_size=768)
+        opt_path = IMAGE_PREP_PATH.replace("_prep.onnx", "_opt.onnx")
+        print(f"\n[Image Encoder] Applying transformer graph optimization "
+              f"(model_type=vit, num_heads={num_heads}, hidden_size={hidden_size})...")
+        maybe_optimize_graph(IMAGE_PREP_PATH, opt_path, model_type="vit",
+                             num_heads=num_heads, hidden_size=hidden_size)
         model_input = opt_path
 
     print(f"\n[Image Encoder] Quantizing (conservative — Conv, MatMul, Gemm; skips Softmax, LayerNorm) "
@@ -178,6 +175,10 @@ def quantize_text_encoder(quant_format, activation_type, calibrate_method):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Local INT8 Static Quantization for CLIP")
     parser.add_argument(
+        "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
+        help="CLIP model variant to quantize (default: ViT-B/16)",
+    )
+    parser.add_argument(
         "--format", default="qoperator", choices=["qoperator", "qdq"],
         help=(
             "Quantization format:\n"
@@ -216,20 +217,37 @@ if __name__ == "__main__":
     calibrate_method = (CalibrationMethod.Percentile if args.calibration == "percentile"
                         else CalibrationMethod.MinMax)
 
+    # Derive file paths and model params from --model
+    if args.model == "ViT-B/16":
+        slug = ""
+        num_heads, hidden_size = 12, 768
+    else:  # ViT-L/14
+        slug = "_" + args.model.lower().replace("/", "").replace("-", "")  # "_vitl14"
+        num_heads, hidden_size = 16, 1024
+
+    IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}.onnx")
+    TEXT_ONNX_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}.onnx")
+    IMAGE_INT8_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}_int8.onnx")
+    TEXT_INT8_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}_int8.onnx")
+    IMAGE_PREP_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}_prep.onnx")
+    TEXT_PREP_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}_prep.onnx")
+
     # Validate FP32 ONNX inputs exist
     for path in [IMAGE_ONNX_PATH, TEXT_ONNX_PATH]:
         if not os.path.exists(path):
-            print(f"Error: {path} not found. Run export_onnx.py first.")
+            print(f"Error: {path} not found. Run export_onnx.py --model {args.model} first.")
             sys.exit(1)
 
     print("=== Local ONNXRuntime INT8 Static Quantization ===")
-    print(f"Input:  {ONNX_DIR}/image_encoder.onnx + text_encoder.onnx")
-    print(f"Output: {ONNX_DIR}/image_encoder_int8.onnx + text_encoder_int8.onnx")
+    print(f"Model:  {args.model}")
+    print(f"Input:  {IMAGE_ONNX_PATH} + {TEXT_ONNX_PATH}")
+    print(f"Output: {IMAGE_INT8_PATH} + {TEXT_INT8_PATH}")
     print(f"Config: format={quant_format.name}  activation={activation_type.name}  "
           f"calibration={calibrate_method.name}")
 
     quantize_image_encoder(quant_format, activation_type, calibrate_method,
-                           optimize_graph=args.optimize_graph)
+                           optimize_graph=args.optimize_graph,
+                           num_heads=num_heads, hidden_size=hidden_size)
     quantize_text_encoder(quant_format, activation_type, calibrate_method)
 
     print("\n=== Quantization complete ===")

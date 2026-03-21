@@ -31,12 +31,8 @@ import clip as clip_lib
 
 from inference import evaluate_track1
 
-# --- Configuration ---
+# --- Configuration (paths set after argparse below) ---
 ONNX_DIR = "exported_onnx"
-IMAGE_FP32  = os.path.join(ONNX_DIR, "image_encoder.onnx")
-TEXT_FP32   = os.path.join(ONNX_DIR, "text_encoder.onnx")
-IMAGE_INT8  = os.path.join(ONNX_DIR, "image_encoder_int8.onnx")
-TEXT_INT8   = os.path.join(ONNX_DIR, "text_encoder_int8.onnx")
 
 DATA_DIR  = r"C:\rama\projects\data\lpcvc_track1_sample_data"
 IMAGE_DIR = os.path.join(DATA_DIR, "images")
@@ -135,6 +131,10 @@ def run_cross_inference(img_model_path, txt_model_path, images, text_tokens, lab
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ONNX Local Inference: FP32 vs INT8")
     parser.add_argument(
+        "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
+        help="CLIP model variant to evaluate (default: ViT-B/16)",
+    )
+    parser.add_argument(
         "--mode", default="all",
         choices=["all", "fp32", "int8", "fp32_img_int8_txt", "int8_img_fp32_txt"],
         help=(
@@ -154,7 +154,18 @@ if __name__ == "__main__":
 
     inspect = args.inspect_embeddings
 
-    print("=== ONNX Local Inference: FP32 vs INT8 ===\n")
+    # Derive paths from --model
+    if args.model == "ViT-B/16":
+        slug = ""
+    else:
+        slug = "_" + args.model.lower().replace("/", "").replace("-", "")  # "_vitl14"
+
+    IMAGE_FP32 = os.path.join(ONNX_DIR, f"image_encoder{slug}.onnx")
+    TEXT_FP32  = os.path.join(ONNX_DIR, f"text_encoder{slug}.onnx")
+    IMAGE_INT8 = os.path.join(ONNX_DIR, f"image_encoder{slug}_int8.onnx")
+    TEXT_INT8  = os.path.join(ONNX_DIR, f"text_encoder{slug}_int8.onnx")
+
+    print(f"=== ONNX Local Inference: FP32 vs INT8 ({args.model}) ===\n")
 
     fp32_available = os.path.exists(IMAGE_FP32) and os.path.exists(TEXT_FP32)
     int8_available = os.path.exists(IMAGE_INT8) and os.path.exists(TEXT_INT8)

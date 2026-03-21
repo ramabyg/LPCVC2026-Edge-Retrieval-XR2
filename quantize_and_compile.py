@@ -10,6 +10,7 @@ Steps:
 
 import sys
 import os
+import argparse
 import qai_hub
 import onnx
 import numpy as np
@@ -19,11 +20,23 @@ from PIL import Image
 sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
+parser = argparse.ArgumentParser(description="INT8 Quantize + Compile + Profile on QAI Hub")
+parser.add_argument(
+    "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
+    help="CLIP model variant to quantize and compile (default: ViT-B/16)",
+)
+args = parser.parse_args()
+
 # --- Configuration ---
 ONNX_DIR = "exported_onnx"
-# ONNX_DIR = r"C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\exported_onnx"
-IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, "image_encoder.onnx")
-TEXT_ONNX_PATH = os.path.join(ONNX_DIR, "text_encoder.onnx")
+
+if args.model == "ViT-B/16":
+    slug = ""
+else:
+    slug = "_" + args.model.lower().replace("/", "").replace("-", "")  # "_vitl14"
+
+IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}.onnx")
+TEXT_ONNX_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}.onnx")
 
 DATA_DIR = r"C:\rama\projects\data\lpcvc_track1_sample_data"
 IMAGE_DIR = os.path.join(DATA_DIR, "images")
@@ -70,10 +83,13 @@ def prepare_text_calibration_data():
 
 # --- Main ---
 if __name__ == "__main__":
+    print(f"Model: {args.model}")
+
     # Validate ONNX files exist
-    if not os.path.exists(IMAGE_ONNX_PATH) or not os.path.exists(TEXT_ONNX_PATH):
-        print(f"Error: ONNX files not found in '{ONNX_DIR}'. Run export_onnx.py first.")
-        sys.exit(1)
+    for path in [IMAGE_ONNX_PATH, TEXT_ONNX_PATH]:
+        if not os.path.exists(path):
+            print(f"Error: {path} not found. Run export_onnx.py --model {args.model} first.")
+            sys.exit(1)
 
     # Load ONNX models
     print(f"Loading image encoder from {IMAGE_ONNX_PATH}...")

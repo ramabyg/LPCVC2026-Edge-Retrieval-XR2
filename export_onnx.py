@@ -1,4 +1,5 @@
 import sys
+import argparse
 import torch
 import os
 
@@ -10,10 +11,31 @@ ONNX_DIR = "exported_onnx"
 device = torch.device("cpu") # use CPU to export onnx model to avoid GPU device issues
 # -----------------------------------
 
+parser = argparse.ArgumentParser(description="Export CLIP encoder(s) to ONNX")
+parser.add_argument(
+    "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
+    help="CLIP model variant to export (default: ViT-B/16)",
+)
+parser.add_argument(
+    "--encoder", default="both", choices=["image", "text", "both"],
+    help="Which encoder to export (default: both)",
+)
+args = parser.parse_args()
+
+# Derive output filename suffix — ViT-B/16 keeps canonical names for backward compat
+if args.model == "ViT-B/16":
+    image_onnx_path = os.path.join(ONNX_DIR, "image_encoder.onnx")
+    text_onnx_path  = os.path.join(ONNX_DIR, "text_encoder.onnx")
+else:
+    slug = args.model.lower().replace("/", "").replace("-", "")  # "vitl14"
+    image_onnx_path = os.path.join(ONNX_DIR, f"image_encoder_{slug}.onnx")
+    text_onnx_path  = os.path.join(ONNX_DIR, f"text_encoder_{slug}.onnx")
+
 # -----------------------------
 # 1. Prepare Environment
 # -----------------------------
 os.makedirs(ONNX_DIR, exist_ok=True)
+print(f"Model:  {args.model}")
 print(f"Saving ONNX files to directory: {os.path.abspath(ONNX_DIR)}")
 
 # -----------------------------
@@ -25,8 +47,8 @@ DUMMY_TEXT_INPUT = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=de
 # -----------------------------
 # 3. Load CLIP model from local clip_model module
 # -----------------------------
-print("Loading CLIP model from clip_model...")
-clip_model, _ = clip_lib.load("ViT-B/16", device=device)
+print(f"Loading CLIP model ({args.model}) from clip_model...")
+clip_model, _ = clip_lib.load(args.model, device=device)
 clip_model = clip_model.to(torch.float32) # convert all model params to float32 type, consistent with input type in compiling and profiling via AIHub
 clip_model.eval()
 
@@ -75,43 +97,45 @@ text_encoder.eval()
 # -----------------------------
 # 5. Export Image Encoder
 # -----------------------------
-image_onnx_path = os.path.join(ONNX_DIR, "image_encoder.onnx")
-print(f"\nExporting Image Encoder to {image_onnx_path}...")
+if args.encoder in ("image", "both"):
+    print(f"\nExporting Image Encoder to {image_onnx_path}...")
 
-torch.onnx.export(
-    image_encoder,
-    DUMMY_IMAGE_INPUT,
-    image_onnx_path,
-    input_names=["image"],
-    output_names=["embedding"],
-    opset_version=18,
-    do_constant_folding=True,
-    dynamic_axes=None,
-    verbose=False,
-    export_params=True,
-    training=torch.onnx.TrainingMode.EVAL,
-    dynamo=True,
-)
+    torch.onnx.export(
+        image_encoder,
+        DUMMY_IMAGE_INPUT,
+        image_onnx_path,
+        input_names=["image"],
+        output_names=["embedding"],
+        opset_version=18,
+        do_constant_folding=True,
+        dynamic_axes=None,
+        verbose=False,
+        export_params=True,
+        training=torch.onnx.TrainingMode.EVAL,
+        dynamo=True,
+    )
+    print(f"  Saved: {image_onnx_path}")
 
 # -----------------------------
 # 6. Export Text Encoder
 # -----------------------------
-text_onnx_path = os.path.join(ONNX_DIR, "text_encoder.onnx")
-print(f"\nExporting Text Encoder to {text_onnx_path}...")
+if args.encoder in ("text", "both"):
+    print(f"\nExporting Text Encoder to {text_onnx_path}...")
 
-torch.onnx.export(
-    text_encoder,
-    DUMMY_TEXT_INPUT,
-    text_onnx_path,
-    input_names=["text"],
-    output_names=["text_embedding"],
-    opset_version=18,
-    do_constant_folding=True,
-    dynamic_axes=None,
-    verbose=False,
-    export_params=True,
-    training=torch.onnx.TrainingMode.EVAL,
-    dynamo=True,
-)
+    torch.onnx.export(
+        text_encoder,
+        DUMMY_TEXT_INPUT,
+        text_onnx_path,
+        input_names=["text"],
+        output_names=["text_embedding"],
+        opset_version=18,
+        do_constant_folding=True,
+        dynamic_axes=None,
+        verbose=False,
+        export_params=True,
+        training=torch.onnx.TrainingMode.EVAL,
+        dynamo=True,
+    )
+    print(f"  Saved: {text_onnx_path}")
 
 print("\nExport complete.")
