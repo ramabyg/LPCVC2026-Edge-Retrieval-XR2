@@ -151,3 +151,25 @@ ViT-L/14 On-Device vs Local Recall Gap — Diagnosis & Fix
                                                                                                                                                                                                                                                                                                          
   Step 3 — Compile INT8 to QNN DLC                                                                                                                                                                                                                                                                       
   python compile_and_profile.py --model ViT-L/14 --int8                                                                                                                                                                                                                                                    Update the compile IDs in inference.py, then run on-device.   
+
+  ### Bench Marks with ViT-L/14 for local inference for 56 sample data set
+  | Name| Recall!10 Score | Notes |
+  |-----|-------|-------|
+  | **Plane** | 0.9003 | Just loaded model as is|
+  | **ONNX Exported** |  0.8857 | Exported and run on FP32 mode|
+
+|===================================================| 
+| Recall@10 Results|
+| ==================================================|
+
+  FP32                       0.8857
+
+  INT8                       0.8567
+
+  FP32_img+INT8_txt          0.8656
+
+  INT8_img+FP32_txt          0.8893
+
+  Delta (INT8 vs FP32)       -0.0290
+
+  
