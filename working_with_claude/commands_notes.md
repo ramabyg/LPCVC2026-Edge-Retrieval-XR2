@@ -158,18 +158,94 @@ ViT-L/14 On-Device vs Local Recall Gap — Diagnosis & Fix
   | **Plane** | 0.9003 | Just loaded model as is|
   | **ONNX Exported** |  0.8857 | Exported and run on FP32 mode|
 
-|===================================================| 
-| Recall@10 Results|
-| ==================================================|
+  | Config | Recall@10 |
+  |--------|-----------|
+  | FP32 | 0.8857 |
+  | INT8 | 0.8567 |
+  | FP32_img + INT8_txt | 0.8656 |
+  | INT8_img + FP32_txt | 0.8893 |
+  | Delta (INT8 vs FP32) | -0.0290 |
 
-  FP32                       0.8857
+### Bench Marks with ViT-L/14 on platform for sample data set
+| Config | Recall@10 | Notes |
+|--------|-----------|-------|
+| quantize_and_compile.py | 0.026785714285714284 | Quantization Done on Platform. destroying Softmax/LayerNorm|
+| run_on_device.py  | 0.7262 | local quantization, qdq, compile and running. Inference time: 13.2ms and 434MB peak memory for Text, 133.0ms and 1369MB peak memory for Image |
 
-  INT8                       0.8567
+### New file with combining compile, profile, inference
+#### ViT-B/16 FP32                                                                                                                                                                                                                               python run_on_device.py
+                                                                                                                                                                                                                                              
+#### ViT-L/14 FP32
+  python run_on_device.py --model ViT-L/14
+#### ViT-B/16 INT8 (need to run quantize_local.py --format qdq first)
+  python run_on_device.py --int8
+#### ViT-L/14 INT8
+  python run_on_device.py --model ViT-L/14 --int8
+#### With updated datasets
+  python run_on_device.py --image-dataset-id dXXX --text-dataset-id dXXX
 
-  FP32_img+INT8_txt          0.8656
+---
 
-  INT8_img+FP32_txt          0.8893
+## 2026-03-24 — Local Quantization Benchmark (all combos)
 
-  Delta (INT8 vs FP32)       -0.0290
+Run: `python quantize_local.py` → `python inference_onnx_local.py --sweep`
 
-  
+| Model    | Format     | Activation | Recall@10 | vs FP32  |
+|----------|------------|------------|-----------|----------|
+| ViT-B/16 | FP32       | —          | 0.8728    | —        |
+| ViT-B/16 | qdq        | qint8      | 0.8256    | -0.0472  |
+| ViT-B/16 | qdq        | quint8     | 0.8256    | -0.0472  |
+| ViT-B/16 | qoperator  | qint8      | 0.8250    | -0.0478  |
+| ViT-B/16 | qoperator  | quint8     | 0.8256    | -0.0472  |
+| ViT-L/14 | FP32       | —          | 0.8857    | —        |
+| ViT-L/14 | qdq        | qint8      | 0.8567    | -0.0290  |
+| ViT-L/14 | qdq        | quint8     | 0.8567    | -0.0290  |
+| ViT-L/14 | qoperator  | qint8      | 0.8649    | -0.0208  |
+| ViT-L/14 | qoperator  | quint8     | 0.8567    | -0.0290  |
+
+**Key observations:**
+- ViT-B/16: all INT8 combos identical (~0.8256) — format/activation has no local impact
+- ViT-L/14: qoperator+qint8 is best (0.8649), ~0.02 better than qdq variants
+- ViT-L/14 INT8 (0.8567–0.8649) beats ViT-B/16 INT8 (0.8256) by ~0.03–0.04
+- For QAI Hub (on-device): use qdq format; qoperator is local-only
+
+---
+
+## 2026-03-25 — On-Device Sweep Results (XR2 Gen 2)
+
+Run: `python sweep_on_device.py`
+
+| Model    | Format    | Activation | Img(ms) | Txt(ms) | Total(ms) | ImgMem(MiB) | TxtMem(MiB) | Recall@10 | vs FP32  |
+|----------|-----------|------------|---------|---------|-----------|-------------|-------------|-----------|----------|
+| ViT-B/16 | fp32      | —          | 26.8    | 4.6     | 31.4      | 227         | 132         | 0.7299    | —        |
+| ViT-L/14 | fp32      | —          | 121.6   | 8.9     | 130.4     | 886         | 153         | 0.7429    | —        |
+| ViT-B/16 | qdq       | qint8      | 32.5    | 6.8     | 39.3      | 421         | 210         | 0.0433    | -0.6867  |
+| ViT-B/16 | qdq       | quint8     | 32.2    | 6.8     | 39.1      | 355         | 205         | 0.6804    | -0.0496  |
+| ViT-B/16 | qoperator | qint8      | FAIL    | FAIL    | —         | n/a         | n/a         | FAIL      | —        |
+| ViT-B/16 | qoperator | quint8     | FAIL    | FAIL    | —         | n/a         | n/a         | FAIL      | —        |
+| ViT-L/14 | qdq       | qint8      | 131.7   | 13.2    | 144.9     | 394         | 221         | 0.0625    | -0.6804  |
+| ViT-L/14 | qdq       | quint8     | 134.0   | 13.0    | 146.9     | 461         | 219         | 0.7262    | -0.0167  |
+| ViT-L/14 | qoperator | qint8      | FAIL    | FAIL    | —         | n/a         | n/a         | FAIL      | —        |
+| ViT-L/14 | qoperator | quint8     | FAIL    | FAIL    | —         | n/a         | n/a         | FAIL      | —        |
+
+### Analysis (from profile log review)
+
+**Why INT8 is SLOWER than FP32 (32.5ms vs 26.8ms):**
+The QDQ compiler inserts explicit `DequantizeLinear` and dtype conversion nodes throughout the graph:
+- `QNN_DATATYPE_FLOAT_32 → FLOAT_16` conversions at input
+- `DequantizeLinear` nodes scattered after quantized ops
+- These add ~4-6ms overhead — all layers still run on NPU, zero CPU fallback
+
+**Why qint8 Recall collapsed (0.04):**
+Softmax and LayerNorm are being re-quantized by the QAI Hub compiler on-device despite being
+excluded in local ONNX. Signed int8 (±127) destroys attention score distributions.
+quint8 (0–255) preserves more dynamic range → 0.68 recall.
+
+**Why memory INCREASED with INT8 (421 MiB vs 227 MiB FP32):**
+QDQ format keeps both quantized and dequantized tensor buffers simultaneously in SRAM.
+Compiler does not fuse/eliminate intermediate buffers.
+
+**Why QOperator FAILS on-device:**
+QAI Hub compiler does not support QOperator format — only QDQ is accepted.
+
+**ViT-L/14 verdict:** 121ms+ at any precision, 4.5× over 35ms budget. Abandoned for on-device.

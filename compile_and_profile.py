@@ -29,14 +29,15 @@ def run_profile(model, device):
     return profile_job.job_id
 
 def compile_model(model, device, input_specs):
-    """Submits a compile job for the model and returns the job instance."""
+    """Submits a compile job for the model and waits for completion."""
     compile_job = qai_hub.submit_compile_job(
         model=model,
         device=device,
         input_specs=input_specs,
         options="--target_runtime qnn_dlc --truncate_64bit_io"
     )
-    return compile_job.job_id
+    compile_job.wait()
+    return compile_job
 
 # Derive paths from --model (matches export_onnx.py naming convention)
 if args.model == "ViT-B/16":
@@ -84,30 +85,30 @@ target_device = qai_hub.Device("XR2 Gen 2 (Proxy)")
 
 # Submit compilation jobs
 print("\nSubmitting compilation jobs to QAI Hub...")
-img_id = compile_model(
-    model=onnx_img_model, 
-    device=target_device, 
+img_job = compile_model(
+    model=onnx_img_model,
+    device=target_device,
     input_specs={"image": (1, 3, 224, 224)}
 )
-txt_id = compile_model(
-    model=onnx_txt_model, 
-    device=target_device, 
+txt_job = compile_model(
+    model=onnx_txt_model,
+    device=target_device,
     input_specs={"text": ((1, 77), "int64")}
 )
 
 print(f"\n=== Job IDs ===")
-print(f"Image compile job: {img_id}")
-print(f"Text compile  job: {txt_id}")
+print(f"Image compile job: {img_job.job_id}")
+print(f"Text compile  job: {txt_job.job_id}")
 
 
 # Submit profiling jobs
 print("\nSubmitting profiling jobs to QAI Hub...")
 run_profile(
-    model=qai_hub.get_job(img_id).get_target_model(), 
+    model=img_job.get_target_model(),
     device=target_device
 )
 run_profile(
-    model=qai_hub.get_job(txt_id).get_target_model(), 
+    model=txt_job.get_target_model(),
     device=target_device
 )
 print("Profiling jobs submitted for both models.")

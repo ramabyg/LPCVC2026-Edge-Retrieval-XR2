@@ -7,21 +7,24 @@ Steps:
   3. Quantize text encoder (MatMul/Gemm only) — conservative, preserves accuracy
   4. Output quantized ONNX files ready for local inference or QAI Hub recompile
 
-Output:
-  exported_onnx/image_encoder_int8.onnx
-  exported_onnx/text_encoder_int8.onnx
+Output filenames include format + activation for easy benchmarking:
+  exported_onnx/image_encoder{slug}_int8_{format}_{activation}.onnx
+  exported_onnx/text_encoder{slug}_int8_{format}_{activation}.onnx
+
+Examples:
+  image_encoder_int8_qoperator_quint8.onnx
+  image_encoder_vitl14_int8_qdq_qint8.onnx
 
 Usage:
-  python quantize_local.py                       # default: QOperator, QUInt8 activations, Percentile
-  python quantize_local.py --format qdq          # use QDQ format instead (for QAI Hub export)
-  python quantize_local.py --activation qint8    # signed int8 activations
-  python quantize_local.py --calibration minmax  # MinMax calibration instead of Percentile
-  python quantize_local.py --optimize-graph      # apply transformer graph fusion before quantization
+  python quantize_local.py                                    # all 4 combos × both models (8 per encoder)
+  python quantize_local.py --model ViT-B/16                  # all 4 combos for ViT-B/16 only
+  python quantize_local.py --model ViT-B/16 --format qdq --activation qint8  # single targeted combo
+  python quantize_local.py --optimize-graph                  # apply transformer graph fusion before quant
 
 Quantization format notes:
-  QOperator (default) — fuses Q/DQ into ops, always outputs float32. Best for local ORT inference.
-  QDQ              — inserts paired Q/DQ nodes. Designed for hardware compilers (QAI Hub, TensorRT).
-                     ORT may return raw int8 output values when using QDQ, causing ~random Recall@10.
+  QOperator — fuses Q/DQ into ops, always outputs float32. Best for local ORT inference.
+  QDQ       — inserts paired Q/DQ nodes. Designed for hardware compilers (QAI Hub, TensorRT).
+              ORT may return raw int8 output values when using QDQ, causing ~random Recall@10.
 
 Image encoder quantization notes:
   Only Conv, MatMul, and Gemm are quantized (same conservative approach as text encoder).
@@ -49,13 +52,21 @@ from onnxruntime.quantization import (
 )
 from onnxruntime.quantization.preprocess import quant_pre_process
 
-# --- Configuration (set after argparse below) ---
+# --- Configuration ---
 ONNX_DIR = "exported_onnx"
 
 DATA_DIR  = r"C:\rama\projects\data\lpcvc_track1_sample_data"
 IMAGE_DIR = os.path.join(DATA_DIR, "images")
 IMG_LIST  = os.path.join(DATA_DIR, "img_list.csv")
 TXT_LIST  = os.path.join(DATA_DIR, "txt_list.csv")
+
+# All 4 quantization combinations
+COMBOS = [
+    (QuantFormat.QOperator, QuantType.QUInt8, "qoperator", "quint8"),
+    (QuantFormat.QOperator, QuantType.QInt8,  "qoperator", "qint8"),
+    (QuantFormat.QDQ,       QuantType.QUInt8, "qdq",       "quint8"),
+    (QuantFormat.QDQ,       QuantType.QInt8,  "qdq",       "qint8"),
+]
 # ---------------------
 
 
@@ -84,7 +95,7 @@ class ImageCalibrationReader(CalibrationDataReader):
 
 
 class TextCalibrationReader(CalibrationDataReader):
-    """Feeds tokenized text prompts as int32 (ONNXRuntime quantization uses int32 internally)."""
+    """Feeds tokenized text prompts as int64."""
 
     def __init__(self):
         df = pd.read_csv(TXT_LIST)
@@ -119,47 +130,51 @@ def maybe_optimize_graph(input_path, output_path, model_type, num_heads, hidden_
     print(f"  Graph optimized -> {output_path}")
 
 
-def quantize_image_encoder(quant_format, activation_type, calibrate_method, optimize_graph=False,
-                           num_heads=12, hidden_size=768):
-    print("\n[Image Encoder] Preprocessing (shape inference + graph optimization)...")
-    quant_pre_process(IMAGE_ONNX_PATH, IMAGE_PREP_PATH)
-
-    model_input = IMAGE_PREP_PATH
+def preprocess_image(onnx_path, prep_path, optimize_graph=False, num_heads=12, hidden_size=768):
+    """Run quant_pre_process (and optional graph optimization) once before quantization loops."""
+    print(f"  Preprocessing (shape inference + graph optimization)...")
+    quant_pre_process(onnx_path, prep_path)
+    model_input = prep_path
     if optimize_graph:
-        opt_path = IMAGE_PREP_PATH.replace("_prep.onnx", "_opt.onnx")
-        print(f"\n[Image Encoder] Applying transformer graph optimization "
-              f"(model_type=vit, num_heads={num_heads}, hidden_size={hidden_size})...")
-        maybe_optimize_graph(IMAGE_PREP_PATH, opt_path, model_type="vit",
+        opt_path = prep_path.replace("_prep.onnx", "_opt.onnx")
+        print(f"  Applying transformer graph optimization (vit, heads={num_heads}, hidden={hidden_size})...")
+        maybe_optimize_graph(prep_path, opt_path, model_type="vit",
                              num_heads=num_heads, hidden_size=hidden_size)
         model_input = opt_path
+    return model_input
 
-    print(f"\n[Image Encoder] Quantizing (conservative — Conv, MatMul, Gemm; skips Softmax, LayerNorm) "
-          f"[format={quant_format.name}, act={activation_type.name}, cal={calibrate_method.name}]...")
+
+def preprocess_text(onnx_path, prep_path):
+    """Run quant_pre_process once before quantization loops."""
+    print(f"  Preprocessing (shape inference + graph optimization)...")
+    quant_pre_process(onnx_path, prep_path)
+    return prep_path
+
+
+def quantize_image(prep_path, output_path, quant_format, activation_type, calibrate_method):
+    """Quantize image encoder from a preprocessed ONNX file."""
     reader = ImageCalibrationReader()
     quantize_static(
-        model_input=model_input,
-        model_output=IMAGE_INT8_PATH,
+        model_input=prep_path,
+        model_output=output_path,
         calibration_data_reader=reader,
         quant_format=quant_format,
         weight_type=QuantType.QInt8,
         activation_type=activation_type,
         calibrate_method=calibrate_method,
-        per_channel=True,                           # per-channel weights: better accuracy for ViT
+        per_channel=True,
         op_types_to_quantize=["Conv", "MatMul", "Gemm"],  # excludes Softmax and LayerNorm
     )
-    size_mb = os.path.getsize(IMAGE_INT8_PATH) / 1e6
-    print(f"  Saved: {IMAGE_INT8_PATH}  ({size_mb:.1f} MB)")
+    size_mb = os.path.getsize(output_path) / 1e6
+    print(f"  Saved: {output_path}  ({size_mb:.1f} MB)")
 
 
-def quantize_text_encoder(quant_format, activation_type, calibrate_method):
-    print("\n[Text Encoder] Preprocessing (shape inference + graph optimization)...")
-    quant_pre_process(TEXT_ONNX_PATH, TEXT_PREP_PATH)
-    print(f"\n[Text Encoder] Quantizing (conservative — MatMul/Gemm only, skip embeddings) "
-          f"[format={quant_format.name}, act={activation_type.name}, cal={calibrate_method.name}]...")
+def quantize_text(prep_path, output_path, quant_format, activation_type, calibrate_method):
+    """Quantize text encoder from a preprocessed ONNX file."""
     reader = TextCalibrationReader()
     quantize_static(
-        model_input=TEXT_PREP_PATH,
-        model_output=TEXT_INT8_PATH,
+        model_input=prep_path,
+        model_output=output_path,
         calibration_data_reader=reader,
         quant_format=quant_format,
         weight_type=QuantType.QInt8,
@@ -168,87 +183,109 @@ def quantize_text_encoder(quant_format, activation_type, calibrate_method):
         per_channel=True,
         op_types_to_quantize=["MatMul", "Gemm"],  # skip Gather (embeddings) and layer norm
     )
-    size_mb = os.path.getsize(TEXT_INT8_PATH) / 1e6
-    print(f"  Saved: {TEXT_INT8_PATH}  ({size_mb:.1f} MB)")
+    size_mb = os.path.getsize(output_path) / 1e6
+    print(f"  Saved: {output_path}  ({size_mb:.1f} MB)")
+
+
+def run_for_model(model_name, calibrate_method, optimize_graph, combos_to_run):
+    """Run all quantization combos for a single model variant."""
+    if model_name == "ViT-B/16":
+        slug = ""
+        num_heads, hidden_size = 12, 768
+    else:
+        slug = "_" + model_name.lower().replace("/", "").replace("-", "")
+        num_heads, hidden_size = 16, 1024
+
+    image_onnx = os.path.join(ONNX_DIR, f"image_encoder{slug}.onnx")
+    text_onnx  = os.path.join(ONNX_DIR, f"text_encoder{slug}.onnx")
+    image_prep = os.path.join(ONNX_DIR, f"image_encoder{slug}_prep.onnx")
+    text_prep  = os.path.join(ONNX_DIR, f"text_encoder{slug}_prep.onnx")
+
+    for path in [image_onnx, text_onnx]:
+        if not os.path.exists(path):
+            print(f"Error: {path} not found. Run export_onnx.py --model {model_name} first.")
+            sys.exit(1)
+
+    print(f"\n{'='*60}")
+    print(f"Model: {model_name}  ({len(combos_to_run)} combo(s)  ×  2 encoders)")
+    print(f"{'='*60}")
+
+    # Preprocess once — shared across all combos for this model
+    print(f"\n[Image Encoder] Preprocess...")
+    image_model_input = preprocess_image(image_onnx, image_prep, optimize_graph,
+                                          num_heads, hidden_size)
+    print(f"\n[Text Encoder] Preprocess...")
+    text_model_input = preprocess_text(text_onnx, text_prep)
+
+    for quant_format, activation_type, fmt_name, act_name in combos_to_run:
+        label = f"{fmt_name}_{act_name}"
+        print(f"\n--- {model_name} | {fmt_name} | {act_name} ---")
+
+        img_out = os.path.join(ONNX_DIR, f"image_encoder{slug}_int8_{fmt_name}_{act_name}.onnx")
+        txt_out = os.path.join(ONNX_DIR, f"text_encoder{slug}_int8_{fmt_name}_{act_name}.onnx")
+
+        print(f"[Image Encoder] Quantizing (Conv/MatMul/Gemm, {label})...")
+        quantize_image(image_model_input, img_out, quant_format, activation_type, calibrate_method)
+
+        print(f"[Text Encoder] Quantizing (MatMul/Gemm, {label})...")
+        quantize_text(text_model_input, txt_out, quant_format, activation_type, calibrate_method)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Local INT8 Static Quantization for CLIP")
     parser.add_argument(
-        "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
-        help="CLIP model variant to quantize (default: ViT-B/16)",
+        "--model", default=None, choices=["ViT-B/16", "ViT-L/14"],
+        help="CLIP model variant. If omitted, runs for both ViT-B/16 and ViT-L/14.",
     )
     parser.add_argument(
-        "--format", default="qoperator", choices=["qoperator", "qdq"],
-        help=(
-            "Quantization format:\n"
-            "  qoperator (default) — fuses Q/DQ into ops, float32 output. Best for local ORT.\n"
-            "  qdq                 — QAI Hub / TensorRT compatible, may output raw int8 in ORT."
-        ),
+        "--format", default=None, choices=["qoperator", "qdq"],
+        help="Quantization format. If omitted (default), all formats are run.",
     )
     parser.add_argument(
-        "--activation", default="quint8", choices=["quint8", "qint8"],
-        help=(
-            "Activation quantization type:\n"
-            "  quint8 (default) — broader ORT CPU kernel coverage, fewer silent fallbacks.\n"
-            "  qint8            — signed int8, required for some hardware targets."
-        ),
+        "--activation", default=None, choices=["quint8", "qint8"],
+        help="Activation quantization type. If omitted (default), all types are run.",
     )
     parser.add_argument(
         "--calibration", default="percentile", choices=["percentile", "minmax"],
         help=(
             "Calibration method:\n"
-            "  percentile (default) — trims outliers, better for transformer attention distributions.\n"
+            "  percentile (default) — trims outliers, better for transformer attention.\n"
             "  minmax               — captures absolute worst-case range."
         ),
     )
     parser.add_argument(
         "--optimize-graph", action="store_true",
-        help=(
-            "Apply onnxruntime.transformers optimizer before quantization (fuses attention, "
-            "LayerNorm, GELU subgraphs). Off by default — try this if accuracy is still poor "
-            "after the standard run."
-        ),
+        help="Apply onnxruntime.transformers optimizer before quantization (fuses attention, LayerNorm, GELU).",
     )
     args = parser.parse_args()
 
-    quant_format = QuantFormat.QOperator if args.format == "qoperator" else QuantFormat.QDQ
-    activation_type = QuantType.QUInt8 if args.activation == "quint8" else QuantType.QInt8
     calibrate_method = (CalibrationMethod.Percentile if args.calibration == "percentile"
                         else CalibrationMethod.MinMax)
 
-    # Derive file paths and model params from --model
-    if args.model == "ViT-B/16":
-        slug = ""
-        num_heads, hidden_size = 12, 768
-    else:  # ViT-L/14
-        slug = "_" + args.model.lower().replace("/", "").replace("-", "")  # "_vitl14"
-        num_heads, hidden_size = 16, 1024
+    # Determine which combos to run based on --format / --activation filters
+    combos_to_run = []
+    for quant_format, activation_type, fmt_name, act_name in COMBOS:
+        if args.format and fmt_name != args.format:
+            continue
+        if args.activation and act_name != args.activation:
+            continue
+        combos_to_run.append((quant_format, activation_type, fmt_name, act_name))
 
-    IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}.onnx")
-    TEXT_ONNX_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}.onnx")
-    IMAGE_INT8_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}_int8.onnx")
-    TEXT_INT8_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}_int8.onnx")
-    IMAGE_PREP_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}_prep.onnx")
-    TEXT_PREP_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}_prep.onnx")
+    if not combos_to_run:
+        print("Error: no combos match the specified --format / --activation filters.")
+        sys.exit(1)
 
-    # Validate FP32 ONNX inputs exist
-    for path in [IMAGE_ONNX_PATH, TEXT_ONNX_PATH]:
-        if not os.path.exists(path):
-            print(f"Error: {path} not found. Run export_onnx.py --model {args.model} first.")
-            sys.exit(1)
+    models_to_run = [args.model] if args.model else ["ViT-B/16", "ViT-L/14"]
 
     print("=== Local ONNXRuntime INT8 Static Quantization ===")
-    print(f"Model:  {args.model}")
-    print(f"Input:  {IMAGE_ONNX_PATH} + {TEXT_ONNX_PATH}")
-    print(f"Output: {IMAGE_INT8_PATH} + {TEXT_INT8_PATH}")
-    print(f"Config: format={quant_format.name}  activation={activation_type.name}  "
-          f"calibration={calibrate_method.name}")
+    print(f"Models:      {models_to_run}")
+    print(f"Combos:      {[(f, a) for _, _, f, a in combos_to_run]}")
+    print(f"Calibration: {args.calibration}")
+    total = len(models_to_run) * len(combos_to_run)
+    print(f"Total runs:  {total} image encoder + {total} text encoder = {total*2} files")
 
-    quantize_image_encoder(quant_format, activation_type, calibrate_method,
-                           optimize_graph=args.optimize_graph,
-                           num_heads=num_heads, hidden_size=hidden_size)
-    quantize_text_encoder(quant_format, activation_type, calibrate_method)
+    for model_name in models_to_run:
+        run_for_model(model_name, calibrate_method, args.optimize_graph, combos_to_run)
 
     print("\n=== Quantization complete ===")
-    print("Next: python inference_onnx_local.py --inspect-embeddings")
+    print("Next: python inference_onnx_local.py --sweep")

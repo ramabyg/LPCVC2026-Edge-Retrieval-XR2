@@ -1,24 +1,25 @@
 """
 Local ONNX inference for CLIP — compares FP32 vs INT8 Recall@10.
 
-Runs both the FP32 and INT8 ONNX models via ONNXRuntime and prints
-side-by-side Recall@10 scores.
+Runs ONNX models via ONNXRuntime and prints Recall@10 scores.
 
 Prerequisites:
-  1. Run export_onnx.py       → exported_onnx/image_encoder.onnx + text_encoder.onnx
-  2. Run quantize_local.py    → exported_onnx/image_encoder_int8.onnx + text_encoder_int8.onnx
+  1. Run export_onnx.py       → exported_onnx/image_encoder*.onnx + text_encoder*.onnx
+  2. Run quantize_local.py    → exported_onnx/image_encoder*_int8_*.onnx
 
 Usage:
-  python inference_onnx_local.py                        # run all available combinations
-  python inference_onnx_local.py --mode fp32            # FP32 only
-  python inference_onnx_local.py --mode int8            # INT8 only
-  python inference_onnx_local.py --mode fp32_img_int8_txt  # cross: FP32 image + INT8 text
-  python inference_onnx_local.py --mode int8_img_fp32_txt  # cross: INT8 image + FP32 text
-  python inference_onnx_local.py --inspect-embeddings   # print embedding stats for first sample
+  python inference_onnx_local.py --sweep               # auto-discover all combos, print table
+  python inference_onnx_local.py --model ViT-B/16      # all available combos for one model
+  python inference_onnx_local.py --mode fp32           # FP32 only
+  python inference_onnx_local.py --mode int8           # INT8 only (legacy _int8.onnx or first discovered)
+  python inference_onnx_local.py --mode fp32_img_int8_txt
+  python inference_onnx_local.py --mode int8_img_fp32_txt
+  python inference_onnx_local.py --inspect-embeddings  # print embedding stats for first sample
 """
 
 import sys
 import os
+import re
 import argparse
 import numpy as np
 import pandas as pd
@@ -31,13 +32,18 @@ import clip as clip_lib
 
 from inference import evaluate_track1
 
-# --- Configuration (paths set after argparse below) ---
+# --- Configuration ---
 ONNX_DIR = "exported_onnx"
 
 DATA_DIR  = r"C:\rama\projects\data\lpcvc_track1_sample_data"
 IMAGE_DIR = os.path.join(DATA_DIR, "images")
 IMG_LIST  = os.path.join(DATA_DIR, "img_list.csv")
 TXT_LIST  = os.path.join(DATA_DIR, "txt_list.csv")
+
+SLUG_TO_MODEL = {
+    "":       "ViT-B/16",
+    "_vitl14": "ViT-L/14",
+}
 # ---------------------
 
 
@@ -88,7 +94,7 @@ def run_inference(img_model_path, txt_model_path, images, text_tokens, label,
     img_output = []
     for i, arr in enumerate(images):
         out = img_sess.run(None, {img_input_name: arr})
-        img_output.append(out[0])  # (1, 512)
+        img_output.append(out[0])
         if inspect and i == 0:
             print(f"\n  --- Embedding inspection (first sample) ---")
             print_embedding_stats(out[0], f"[{label}] image embed[0]")
@@ -97,12 +103,11 @@ def run_inference(img_model_path, txt_model_path, images, text_tokens, label,
     txt_output = []
     for i, arr in enumerate(text_tokens):
         out = txt_sess.run(None, {txt_input_name: arr})
-        txt_output.append(out[0])  # (1, 512)
+        txt_output.append(out[0])
         if inspect and i == 0:
             print_embedding_stats(out[0], f"[{label}] text embed[0]")
 
     if inspect and img_output and txt_output:
-        # Cosine similarity between first image and first text embedding
         img_vec = img_output[0].flatten().astype(np.float32)
         txt_vec = txt_output[0].flatten().astype(np.float32)
         img_norm = np.linalg.norm(img_vec)
@@ -115,35 +120,85 @@ def run_inference(img_model_path, txt_model_path, images, text_tokens, label,
     return img_output, txt_output
 
 
-def make_session(model_path):
-    sess_options = ort.SessionOptions()
-    sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-    return ort.InferenceSession(model_path, sess_options=sess_options)
+def discover_int8_combos(model_filter=None):
+    """
+    Scan exported_onnx/ for image_encoder*_int8_*.onnx files.
+    Returns list of (slug, fmt_name, act_name, img_path, txt_path).
+    Only includes entries where both image and text encoder files exist.
+    """
+    # Pattern: image_encoder{slug}_int8_{format}_{activation}.onnx
+    pattern = re.compile(r"^image_encoder((?:_vitl14)?(?:_vitb16)?)_int8_([a-z]+)_([a-z0-9]+)\.onnx$")
+    combos = []
+    if not os.path.isdir(ONNX_DIR):
+        return combos
+
+    for fname in sorted(os.listdir(ONNX_DIR)):
+        m = pattern.match(fname)
+        if not m:
+            continue
+        slug, fmt_name, act_name = m.group(1), m.group(2), m.group(3)
+
+        # Apply model filter if specified
+        if model_filter is not None:
+            expected_slug = "" if model_filter == "ViT-B/16" else "_vitl14"
+            if slug != expected_slug:
+                continue
+
+        txt_fname = f"text_encoder{slug}_int8_{fmt_name}_{act_name}.onnx"
+        img_path = os.path.join(ONNX_DIR, fname)
+        txt_path = os.path.join(ONNX_DIR, txt_fname)
+
+        if not os.path.exists(txt_path):
+            print(f"Warning: found {fname} but missing {txt_fname} — skipping.")
+            continue
+
+        combos.append((slug, fmt_name, act_name, img_path, txt_path))
+
+    return combos
 
 
-def run_cross_inference(img_model_path, txt_model_path, images, text_tokens, label,
-                        inspect=False):
-    """Same as run_inference but with explicit path args (used for cross combos)."""
-    return run_inference(img_model_path, txt_model_path, images, text_tokens, label,
-                         inspect=inspect)
+def print_summary_table(results):
+    """
+    Print a formatted summary table.
+    results: list of dicts with keys: model, format, activation, recall, fp32_recall
+    """
+    print("\n" + "=" * 72)
+    print("Recall@10 Benchmark Summary")
+    print("=" * 72)
+    print(f"  {'Model':<10} {'Format':<12} {'Activation':<12} {'Recall@10':>10} {'vs FP32':>9}")
+    print(f"  {'-'*10} {'-'*12} {'-'*12} {'-'*10} {'-'*9}")
+
+    for r in results:
+        delta_str = ""
+        if r.get("fp32_recall") is not None and r["format"] != "FP32":
+            delta = r["recall"] - r["fp32_recall"]
+            delta_str = f"{delta:+.4f}"
+        print(f"  {r['model']:<10} {r['format']:<12} {r['activation']:<12} "
+              f"{r['recall']:>10.4f} {delta_str:>9}")
+
+    print("=" * 72)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="ONNX Local Inference: FP32 vs INT8")
+    parser = argparse.ArgumentParser(description="ONNX Local Inference: FP32 vs INT8 benchmark")
     parser.add_argument(
-        "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
-        help="CLIP model variant to evaluate (default: ViT-B/16)",
+        "--model", default=None, choices=["ViT-B/16", "ViT-L/14"],
+        help="CLIP model variant. If omitted with --sweep, runs all discovered models.",
+    )
+    parser.add_argument(
+        "--sweep", action="store_true",
+        help="Auto-discover all INT8 combo files in exported_onnx/ and benchmark them all.",
     )
     parser.add_argument(
         "--mode", default="all",
         choices=["all", "fp32", "int8", "fp32_img_int8_txt", "int8_img_fp32_txt"],
         help=(
-            "Which encoder combination(s) to run:\n"
+            "Which encoder combination(s) to run (used without --sweep):\n"
             "  all               — all available combinations (default)\n"
             "  fp32              — FP32 image + FP32 text\n"
             "  int8              — INT8 image + INT8 text\n"
-            "  fp32_img_int8_txt — FP32 image + INT8 text (cross check)\n"
-            "  int8_img_fp32_txt — INT8 image + FP32 text (cross check)"
+            "  fp32_img_int8_txt — FP32 image + INT8 text\n"
+            "  int8_img_fp32_txt — INT8 image + FP32 text"
         ),
     )
     parser.add_argument(
@@ -154,18 +209,90 @@ if __name__ == "__main__":
 
     inspect = args.inspect_embeddings
 
-    # Derive paths from --model
-    if args.model == "ViT-B/16":
-        slug = ""
-    else:
-        slug = "_" + args.model.lower().replace("/", "").replace("-", "")  # "_vitl14"
+    print("Loading data...")
+    images = load_images()
+    text_tokens = load_text_tokens()
+    print(f"  {len(images)} images, {len(text_tokens)} text prompts loaded.\n")
+
+    # -----------------------------------------------------------------------
+    # SWEEP MODE: auto-discover all available INT8 combos
+    # -----------------------------------------------------------------------
+    if args.sweep or (args.model is None and args.mode == "all"):
+        discovered = discover_int8_combos(model_filter=args.model)
+
+        if not discovered:
+            print("No INT8 combo files found in exported_onnx/.")
+            print("Run: python quantize_local.py")
+            sys.exit(1)
+
+        print(f"Discovered {len(discovered)} INT8 combo(s).\n")
+
+        # FP32 baselines — run once per slug, cache
+        fp32_recalls = {}
+        slugs_seen = sorted({slug for slug, *_ in discovered})
+        for slug in slugs_seen:
+            model_name = SLUG_TO_MODEL.get(slug, slug or "ViT-B/16")
+            img_fp32 = os.path.join(ONNX_DIR, f"image_encoder{slug}.onnx")
+            txt_fp32 = os.path.join(ONNX_DIR, f"text_encoder{slug}.onnx")
+            if os.path.exists(img_fp32) and os.path.exists(txt_fp32):
+                label = f"{model_name} FP32"
+                img_out, txt_out = run_inference(img_fp32, txt_fp32, images, text_tokens,
+                                                  label, inspect=inspect)
+                fp32_recalls[slug] = evaluate_track1(img_out, txt_out, TXT_LIST, IMG_LIST)
+                print(f"  FP32 Recall@10: {fp32_recalls[slug]:.4f}")
+            else:
+                fp32_recalls[slug] = None
+                print(f"Warning: FP32 models for slug='{slug}' not found — skipping baseline.")
+
+        # Run all discovered INT8 combos
+        all_results = []
+
+        # Add FP32 rows first
+        for slug in slugs_seen:
+            model_name = SLUG_TO_MODEL.get(slug, slug or "ViT-B/16")
+            if fp32_recalls.get(slug) is not None:
+                all_results.append({
+                    "model": model_name, "format": "FP32", "activation": "—",
+                    "recall": fp32_recalls[slug], "fp32_recall": None,
+                })
+
+        for slug, fmt_name, act_name, img_path, txt_path in discovered:
+            model_name = SLUG_TO_MODEL.get(slug, slug or "ViT-B/16")
+            label = f"{model_name} {fmt_name} {act_name}"
+            img_out, txt_out = run_inference(img_path, txt_path, images, text_tokens,
+                                              label, inspect=inspect)
+            recall = evaluate_track1(img_out, txt_out, TXT_LIST, IMG_LIST)
+            print(f"  Recall@10: {recall:.4f}")
+            all_results.append({
+                "model": model_name,
+                "format": fmt_name,
+                "activation": act_name,
+                "recall": recall,
+                "fp32_recall": fp32_recalls.get(slug),
+            })
+
+        print_summary_table(all_results)
+        sys.exit(0)
+
+    # -----------------------------------------------------------------------
+    # LEGACY / TARGETED MODE: --model + --mode
+    # -----------------------------------------------------------------------
+    model_name = args.model or "ViT-B/16"
+    slug = "" if model_name == "ViT-B/16" else "_vitl14"
 
     IMAGE_FP32 = os.path.join(ONNX_DIR, f"image_encoder{slug}.onnx")
     TEXT_FP32  = os.path.join(ONNX_DIR, f"text_encoder{slug}.onnx")
-    IMAGE_INT8 = os.path.join(ONNX_DIR, f"image_encoder{slug}_int8.onnx")
-    TEXT_INT8  = os.path.join(ONNX_DIR, f"text_encoder{slug}_int8.onnx")
 
-    print(f"=== ONNX Local Inference: FP32 vs INT8 ({args.model}) ===\n")
+    # For legacy INT8 path: prefer new-style naming, fall back to old _int8.onnx
+    # Try to find at least one INT8 combo (first available)
+    discovered_for_model = discover_int8_combos(model_filter=model_name)
+    if discovered_for_model:
+        _, first_fmt, first_act, IMAGE_INT8, TEXT_INT8 = discovered_for_model[0]
+    else:
+        IMAGE_INT8 = os.path.join(ONNX_DIR, f"image_encoder{slug}_int8.onnx")
+        TEXT_INT8  = os.path.join(ONNX_DIR, f"text_encoder{slug}_int8.onnx")
+
+    print(f"=== ONNX Local Inference: {model_name} | mode={args.mode} ===\n")
 
     fp32_available = os.path.exists(IMAGE_FP32) and os.path.exists(TEXT_FP32)
     int8_available = os.path.exists(IMAGE_INT8) and os.path.exists(TEXT_INT8)
@@ -177,7 +304,6 @@ if __name__ == "__main__":
     if not fp32_available and not int8_available:
         sys.exit(1)
 
-    # Validate requested mode has the required models
     needs_fp32 = args.mode in ("all", "fp32", "fp32_img_int8_txt", "int8_img_fp32_txt")
     needs_int8 = args.mode in ("all", "int8", "fp32_img_int8_txt", "int8_img_fp32_txt")
     if needs_fp32 and not fp32_available:
@@ -187,14 +313,7 @@ if __name__ == "__main__":
         print(f"Error: mode '{args.mode}' requires INT8 models but they were not found.")
         sys.exit(1)
 
-    print("Loading data...")
-    images = load_images()
-    text_tokens = load_text_tokens()
-    print(f"  {len(images)} images, {len(text_tokens)} text prompts loaded.")
-
-    # Define which combinations to run
-    combos = []  # list of (img_path, txt_path, label)
-
+    combos = []
     if args.mode == "all":
         if fp32_available:
             combos.append((IMAGE_FP32, TEXT_FP32, "FP32"))
@@ -219,9 +338,9 @@ if __name__ == "__main__":
         recall = evaluate_track1(img_out, txt_out, TXT_LIST, IMG_LIST)
         results[label] = recall
 
-    # --- Summary ---
+    # Summary
     print("\n" + "=" * 50)
-    print("Recall@10 Results")
+    print(f"Recall@10 Results — {model_name}")
     print("=" * 50)
     for variant, recall in results.items():
         print(f"  {variant:<26} {recall:.4f}")

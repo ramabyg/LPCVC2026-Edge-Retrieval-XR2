@@ -89,11 +89,11 @@ if __name__ == "__main__":
     # TODO: Define tasks with their corresponding compiled job IDs and dataset IDs
     tasks = {
         "text": {
-            "compiled_id": "j5wd232zg",
+            "compiled_id": "jpx7n0nlg",
             "dataset_id": "d70krkm59"
         },
         "image": {
-            "compiled_id": "jp830m0zg",
+            "compiled_id": "j57j0o095",
             "dataset_id": "d2ne8er12"
         }
     }
