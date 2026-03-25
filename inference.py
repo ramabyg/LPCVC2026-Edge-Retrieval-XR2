@@ -86,7 +86,29 @@ if __name__ == "__main__":
     # Define target device
     device = qai_hub.Device("XR2 Gen 2 (Proxy)")
 
-    # TODO: Define tasks with their corresponding compiled job IDs and dataset IDs
+    # --- Job IDs: update after each compile + upload run ---
+    #
+    # FP32 norm-baked baseline (~31ms, Recall@10=0.8805)
+    #   image compiled_id: "jgkymrqvp", dataset_id: "d2ne8er12"
+    #   text  compiled_id: "j5q2o9re5", dataset_id: "d70krkm59"
+    #
+    # INT8 W8A8 first attempt (dataset ordering bug — Recall@10=0.0327, ignore)
+    #   image compiled_id: "jgz7kv3xp"
+    #   text  compiled_id: "j5w9nmemp"
+    #
+    # INT8 W8A8 clean run — norm-baked ONNX, correct dataset ordering (~21.7ms, Recall@10=0.0488)
+    #   image compile: jpx7kj88g  profile: jpr4vqkvg
+    #   text  compile: jgdrx9kkp  profile: jp27k68x5
+    #
+    # INT8 W8A16 (INT8 weights + INT16 activations) — norm-baked ONNX
+    #   with --quantize_io (FAILED: MODEL_GRAPH_ERROR on device)
+    #     image compile: jp34j2jzg  profile: jp34j2nzg
+    #     text  compile: jgo12q2d5  profile: jgo12qzd5
+    #   without --quantize_io (ALSO FAILED: device doesn't support INT16 activations)
+    #     image compile: j5mwnywwp  profile: jgj0v40xp
+    #     text  compile: jgn9689r5  profile: jperd3r1g
+    #
+    # Active config: FP32 norm-baked (best working option)
     tasks = {
         "text": {
             "compiled_id": "jpx7n0nlg",

@@ -6,6 +6,11 @@ Steps:
   2. Submit INT8 quantize jobs (image + text encoders)
   3. Compile quantized models to QNN DLC for XR2 Gen 2
   4. Profile latency on device
+
+Usage:
+  python quantize_and_compile.py                  # default: W8A8
+  python quantize_and_compile.py --precision w8a8  # INT8 weights + INT8 activations (~21.7ms)
+  python quantize_and_compile.py --precision w8a16 # INT8 weights + INT16 activations (~24-26ms, better accuracy)
 """
 
 import sys
@@ -25,7 +30,19 @@ parser.add_argument(
     "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
     help="CLIP model variant to quantize and compile (default: ViT-B/16)",
 )
+parser.add_argument(
+    "--precision", choices=["w8a8", "w8a16"], default="w8a8",
+    help="Quantization precision: w8a8 = INT8 weights + INT8 activations (faster), "
+         "w8a16 = INT8 weights + INT16 activations (more accurate). Default: w8a8",
+)
 args = parser.parse_args()
+
+weights_dtype = qai_hub.QuantizeDtype.INT8
+activations_dtype = (
+    qai_hub.QuantizeDtype.INT8
+    if args.precision == "w8a8"
+    else qai_hub.QuantizeDtype.INT16
+)
 
 # --- Configuration ---
 ONNX_DIR = "exported_onnx"
@@ -84,6 +101,8 @@ def prepare_text_calibration_data():
 # --- Main ---
 if __name__ == "__main__":
     print(f"Model: {args.model}")
+    print(f"Precision mode: {args.precision.upper()} "
+          f"(weights={weights_dtype.name}, activations={activations_dtype.name})")
 
     # Validate ONNX files exist
     for path in [IMAGE_ONNX_PATH, TEXT_ONNX_PATH]:
@@ -108,8 +127,8 @@ if __name__ == "__main__":
     img_quantize_job = qai_hub.submit_quantize_job(
         model=onnx_img_model,
         calibration_data=image_cal_data,
-        weights_dtype=qai_hub.QuantizeDtype.INT8,
-        activations_dtype=qai_hub.QuantizeDtype.INT8,
+        weights_dtype=weights_dtype,
+        activations_dtype=activations_dtype,
     )
     print(f"  Image quantize job: {img_quantize_job.job_id}")
     quantized_img = img_quantize_job.get_target_model()
@@ -119,8 +138,8 @@ if __name__ == "__main__":
     txt_quantize_job = qai_hub.submit_quantize_job(
         model=onnx_txt_model,
         calibration_data=text_cal_data,
-        weights_dtype=qai_hub.QuantizeDtype.INT8,
-        activations_dtype=qai_hub.QuantizeDtype.INT8,
+        weights_dtype=weights_dtype,
+        activations_dtype=activations_dtype,
     )
     print(f"  Text quantize job: {txt_quantize_job.job_id}")
     quantized_txt = txt_quantize_job.get_target_model()
@@ -168,7 +187,7 @@ if __name__ == "__main__":
 
     # --- Summary ---
     print("\n" + "=" * 50)
-    print("INT8 Quantization Results")
+    print(f"Quantization Results [{args.precision.upper()}]")
     print("=" * 50)
     print(f"Image Encoder:")
     print(f"  Quantize job:  {img_quantize_job.job_id}")

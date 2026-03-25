@@ -48,19 +48,9 @@ text_compiled_id  = "j5w9nmemp"
 ### Final Recall@10
 - **0.0327** (significant loss after INT8 quantization)
 
-### Dataset and Compile IDs after correctsion:
-```python
-First image shape: (1, 3, 224, 224)
-First 3 filenames: ['1127792001_9b9b950f20_o.jpg', '1157182238_992e41a670_o.jpg', '12736230865_e67caaeef2_o.jpg']
-Uploading dataset: 10.1MB [00:05, 2.06MB/s]
-Dataset(id='d7x5nnzz9', name='h5-dataset', expiration_time='2026-04-16 05:17:49')
-(1, 77)
-int32
-Uploading dataset: 634kB [00:00, 650kB/s]
-Dataset(id='d2qe11q82', name='h5-dataset', expiration_time='2026-04-16 05:17:56')
-
-Image compilation job ID: j5mwn7ewp
-Text compilation job ID: j5q76n04g
+### Dataset and Compile IDs after correction:
+Note: `j5mwn7ewp` / `j5q76n04g` are **FP32 norm-baked** compiled models — not INT8.
+The 0.8805 below was achieved with FP32, not INT8. The dataset ordering fix was for FP32.
 ```
 - **0.8805059523809524** (After arranging the dataset correctly)
 
@@ -249,3 +239,38 @@ Compiler does not fuse/eliminate intermediate buffers.
 QAI Hub compiler does not support QOperator format — only QDQ is accepted.
 
 **ViT-L/14 verdict:** 121ms+ at any precision, 4.5× over 35ms budget. Abandoned for on-device.
+
+---
+
+## 2026-03-17 — INT8 Clean Run (norm-baked ONNX)
+
+Fresh ONNX export from current norm-baked model → re-quantized from scratch.
+
+### W8A8 (INT8 weights + INT8 activations)
+
+| Component | Quantize | Compile | Profile |
+|-----------|----------|---------|---------|
+| **Image** | j563y6on5 | jpx7kj88g | jpr4vqkvg |
+| **Text**  | j57jyw1n5 | jgdrx9kkp | jp27k68x5 |
+
+- Dataset: image=`d2qe11oo2`, text=`d95ke6gg9`
+- **Recall@10: 0.0488** ← genuine accuracy collapse, not a data bug
+- Latency: ~21.7ms combined (image 16.6ms + text 5.1ms)
+
+### W8A16 (INT8 weights + INT16 activations) — FAILED
+
+| Component | Quantize | Compile (quantize_io) | Compile (no quantize_io) |
+|-----------|----------|-----------------------|--------------------------|
+| **Image** | jgn9686m5 | jp34j2jzg ❌ | j5mwnywwp ❌ |
+| **Text**  | jpr4vjveg | jgo12q2d5 ❌ | jgn9689r5 ❌ |
+
+- With `--quantize_io`: MODEL_GRAPH_ERROR at inference (INT8 I/O incompatible with INT16 activations)
+- Without `--quantize_io`: Also FAILED at inference — XR2 Gen 2 NPU does not support INT16 activations
+- **Conclusion:** W8A16 is not viable on this device
+
+### Summary
+
+Post-training quantization (PTQ) is not viable for CLIP on XR2 Gen 2:
+- W8A8 destroys accuracy (Recall@10: 0.88 → 0.05)
+- W8A16 not supported on device hardware
+- **Recommended path forward:** Quantization-Aware Training (QAT) or stay FP32 and improve via fine-tuning
