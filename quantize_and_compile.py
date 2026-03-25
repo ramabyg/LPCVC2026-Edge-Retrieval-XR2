@@ -44,7 +44,7 @@ IMG_LIST = os.path.join(DATA_DIR, "img_list.csv")
 TXT_LIST = os.path.join(DATA_DIR, "txt_list.csv")
 
 TARGET_DEVICE = qai_hub.Device("XR2 Gen 2 (Proxy)")
-COMPILE_OPTIONS = "--target_runtime qnn_dlc --truncate_64bit_io --quantize_io"
+COMPILE_OPTIONS = "--target_runtime qnn_dlc --truncate_64bit_io"
 PROFILE_OPTIONS = "--max_profiler_iterations 100"
 # ---------------------
 
