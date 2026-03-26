@@ -52,13 +52,9 @@ from onnxruntime.quantization import (
 )
 from onnxruntime.quantization.preprocess import quant_pre_process
 
-# --- Configuration ---
-ONNX_DIR = "exported_onnx"
+from src.common.config import ONNX_DIR, IMAGE_DIR, IMG_LIST, TXT_LIST, ensure_output_dirs
 
-DATA_DIR  = r"C:\rama\projects\data\lpcvc_track1_sample_data"
-IMAGE_DIR = os.path.join(DATA_DIR, "images")
-IMG_LIST  = os.path.join(DATA_DIR, "img_list.csv")
-TXT_LIST  = os.path.join(DATA_DIR, "txt_list.csv")
+ensure_output_dirs()
 
 # All 4 quantization combinations
 COMBOS = [

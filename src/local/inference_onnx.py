@@ -31,19 +31,11 @@ sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
 from src.common.eval import evaluate_track1
+from src.common.config import (
+    ONNX_DIR, IMAGE_DIR, IMG_LIST, TXT_LIST, SLUG_TO_MODEL, ensure_output_dirs,
+)
 
-# --- Configuration ---
-ONNX_DIR = "exported_onnx"
-
-DATA_DIR  = r"C:\rama\projects\data\lpcvc_track1_sample_data"
-IMAGE_DIR = os.path.join(DATA_DIR, "images")
-IMG_LIST  = os.path.join(DATA_DIR, "img_list.csv")
-TXT_LIST  = os.path.join(DATA_DIR, "txt_list.csv")
-
-SLUG_TO_MODEL = {
-    "":       "ViT-B/16",
-    "_vitl14": "ViT-L/14",
-}
+ensure_output_dirs()
 # ---------------------
 
 

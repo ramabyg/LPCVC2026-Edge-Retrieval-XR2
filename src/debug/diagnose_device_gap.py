@@ -26,19 +26,16 @@ sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
 from src.common.eval import evaluate_track1
+from src.common.config import (
+    ONNX_DIR, DIAGNOSTICS_DIR as DIAG_DIR,
+    IMAGE_DIR, IMG_LIST, TXT_LIST,
+    ensure_output_dirs,
+)
 
-# --- Configuration ---
-ONNX_DIR = "exported_onnx"
-DIAG_DIR = "diagnostics"
-
-DATA_DIR = r"C:\rama\projects\data\lpcvc_track1_sample_data"
-IMAGE_DIR = os.path.join(DATA_DIR, "images")
-IMG_LIST = os.path.join(DATA_DIR, "img_list.csv")
-TXT_LIST = os.path.join(DATA_DIR, "txt_list.csv")
+ensure_output_dirs()
 
 LOCAL_IMG_PATH = os.path.join(DIAG_DIR, "local_img_embeddings.npy")
 LOCAL_TXT_PATH = os.path.join(DIAG_DIR, "local_txt_embeddings.npy")
-# ---------------------
 
 
 def load_images():

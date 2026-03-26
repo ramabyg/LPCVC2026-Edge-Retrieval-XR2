@@ -6,10 +6,9 @@ import os
 sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
-# --- Configuration for File Saving ---
-ONNX_DIR = "exported_onnx"
-device = torch.device("cpu") # use CPU to export onnx model to avoid GPU device issues
-# -----------------------------------
+from src.common.config import ONNX_DIR
+
+device = torch.device("cpu")  # use CPU to export onnx model to avoid GPU device issues
 
 parser = argparse.ArgumentParser(description="Export CLIP encoder(s) to ONNX")
 parser.add_argument(

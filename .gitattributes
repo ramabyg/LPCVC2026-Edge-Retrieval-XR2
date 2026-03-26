@@ -1,0 +1,22 @@
+# Normalize line endings: store as LF in git, checkout as LF everywhere.
+# Windows users: configure git with core.autocrlf=false for this repo.
+* text=auto
+
+# Source and text files — always LF
+*.py   text eol=lf
+*.md   text eol=lf
+*.txt  text eol=lf
+*.json text eol=lf
+*.csv  text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.sh   text eol=lf
+
+# Binary files — never modify line endings
+*.onnx binary
+*.pt   binary
+*.npy  binary
+*.zip  binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary

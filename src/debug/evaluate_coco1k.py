@@ -34,12 +34,7 @@ import clip as clip_lib
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-COCO_JSON = r"C:\rama\projects\data\coco\dataset_coco.json"
-COCO_IMAGE_ROOT = r"C:\rama\projects\data\coco"
-ONNX_DIR = "exported_onnx"
-
-CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
-CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
+from src.common.config import COCO_JSON, COCO_DATA_DIR as COCO_IMAGE_ROOT, ONNX_DIR, CLIP_MEAN, CLIP_STD
 
 # Standard CLIP preprocessing (for PyTorch mode)
 pytorch_transform = Compose([

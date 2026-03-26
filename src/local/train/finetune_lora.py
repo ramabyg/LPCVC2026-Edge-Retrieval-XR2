@@ -45,18 +45,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
-CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
+from src.common.config import (
+    CLIP_MEAN, CLIP_STD,
+    COCO_JSON, COCO_DATA_DIR, FLICKR30K_JSON, FLICKR30K_IMG_DIR,
+    CHECKPOINTS_DIR,
+)
 
 DATASET_PATHS = {
-    "coco": {
-        "json": r"C:\rama\projects\data\coco\dataset_coco.json",
-        "image_root": r"C:\rama\projects\data\coco",
-    },
-    "flickr30k": {
-        "json": r"C:\rama\projects\data\flickr30k\dataset_flickr30k.json",
-        "image_root": r"C:\rama\projects\data\flickr30k\images",
-    },
+    "coco":     {"json": COCO_JSON,     "image_root": COCO_DATA_DIR},
+    "flickr30k":{"json": FLICKR30K_JSON,"image_root": FLICKR30K_IMG_DIR},
 }
 
 
@@ -264,7 +261,7 @@ def parse_args():
     parser.add_argument("--no-drop-last", dest="drop_last", action="store_false")
     parser.add_argument("--eval-every", type=int, default=1,
                         help="Evaluate every N epochs")
-    parser.add_argument("--save-dir", default="lora_checkpoints")
+    parser.add_argument("--save-dir", default=CHECKPOINTS_DIR)
     parser.add_argument("--datasets", default="coco",
                         choices=["coco", "flickr30k", "both"],
                         help="Training dataset(s)")
