@@ -28,13 +28,13 @@ Recall@10: for each image, check if its ground-truth text appears in the top-10 
 
 | Step | Script | What it does |
 |------|--------|-------------|
-| 1 | `export_onnx.py` | Exports CLIP image + text encoders to ONNX format |
-| 2 | `compile_and_profile.py` | Uploads ONNX to QAI Hub, compiles to QNN DLC for XR2 Gen 2, profiles latency |
-| 3 | `upload_dataset.py` | Uploads images + tokenized text to QAI Hub (prints dataset IDs) |
-| 4 | `inference.py` | Runs compiled models on QAI Hub device, computes Recall@10 |
-| 5 | `inference_local.py` | Runs CLIP locally (no QAI Hub) for fast iteration — use this for experiments |
+| 1 | `src/platform/export_onnx.py` | Exports CLIP image + text encoders to ONNX format |
+| 2 | `src/platform/compile_and_profile.py` | Uploads ONNX to QAI Hub, compiles to QNN DLC for XR2 Gen 2, profiles latency |
+| 3 | `src/platform/upload_dataset.py` | Uploads images + tokenized text to QAI Hub (prints dataset IDs) |
+| 4 | `src/platform/run_on_device.py` | Compiles + profiles + runs inference on QAI Hub device, computes Recall@10 |
+| 5 | `src/local/inference_pytorch.py` | Runs CLIP locally (no QAI Hub) for fast iteration — use this for experiments |
 
-**Typical workflow for experiments:** edit model → run `inference_local.py` to validate → if good, run steps 1–4 to push to device.
+**Typical workflow for experiments:** edit model → run `src/local/inference_pytorch.py` to validate → if good, run steps 1–4 to push to device.
 
 ## Architecture Decisions
 
@@ -63,8 +63,7 @@ Recall@10: for each image, check if its ground-truth text appears in the top-10 
   mean/std normalization. Now that normalization is baked into `ImageEncoderWrapper`, this
   is correct behavior for the model — but `upload_dataset.py` must NOT add normalization
   (the model handles it). Fix needed: ensure preprocessing matches (just `/255`).
-- **`inference.py` has hardcoded job IDs:** update `compiled_id` and `dataset_id` after each
-  compile/upload run.
+- **Job IDs in `src/platform/run_on_device.py`:** update `DEFAULT_IMAGE_DATASET_ID` and `DEFAULT_TEXT_DATASET_ID` after each upload run.
 - **`.onnx.data` files are used:** they hold the model weights (~344 MB image, ~254 MB text).
   Do not delete them — the `.onnx` file references them by relative path.
 - **After normalization fix:** re-export ONNX and re-compile before running on-device.
@@ -76,14 +75,14 @@ Recall@10: for each image, check if its ground-truth text appears in the top-10 
 |------|------|
 | `clip_model/clip/clip.py` | `clip.load()`, `clip.tokenize()`, `_transform()` preprocessing |
 | `clip_model/clip/model.py` | CLIP model class, `encode_image()`, `encode_text()` |
-| `inference.py` | `evaluate_track1()`, `parse_ground_truth()` — reuse these functions |
-| `export_onnx.py` | `ImageEncoderWrapper` (norm baked in), `TextEncoderWrapper` — modify for experiments |
-| `inference_local.py` | Uses competition-style `/255` input + manual CLIP norm — matches on-device behavior |
+| `src/common/eval.py` | `evaluate_track1()`, `parse_ground_truth()` — reuse these functions |
+| `src/platform/export_onnx.py` | `ImageEncoderWrapper` (norm baked in), `TextEncoderWrapper` — modify for experiments |
+| `src/local/inference_pytorch.py` | Uses competition-style `/255` input + manual CLIP norm — matches on-device behavior |
 
 ## Evaluation Function
 
 ```python
-from inference import evaluate_track1
+from src.common.eval import evaluate_track1
 # img_output: list of numpy arrays shape (1, 512)
 # txt_output: list of numpy arrays shape (1, 512)
 result = evaluate_track1(img_output, txt_output, TXT_LIST_PATH, IMG_LIST_PATH)
@@ -92,7 +91,7 @@ result = evaluate_track1(img_output, txt_output, TXT_LIST_PATH, IMG_LIST_PATH)
 
 ## Optimization Strategy (Phase 0 complete — next steps)
 
-1. **Run `inference_local.py`** → get true FP32 baseline Recall@10 (norm now correctly applied)
+1. **Run `src/local/inference_pytorch.py`** → get true FP32 baseline Recall@10 (norm now correctly applied)
 2. **Re-export ONNX + compile + run on-device** → verify local ≈ on-device Recall@10
 3. **INT8 quantize ViT-B/16** on QAI Hub → profile latency, check Recall@10
 4. **Profile ViT-L/14** (FP32 + INT8) → if fits under 35ms, switch to larger model
@@ -106,7 +105,7 @@ Full plan: `CLIP_Optimization_Plan_v2.md`
 
 | Variant | Recall@10 | Notes |
 |---------|-----------|-------|
-| PyTorch FP32 (local) | **0.8805** | Ground truth — `inference_local.py` |
+| PyTorch FP32 (local) | **0.8805** | Ground truth — `src/local/inference_pytorch.py` |
 | FP32 ONNX (local ORT) | **0.8728** | Small gap due to PIL box resize vs bicubic+centercrop |
 | INT8 ONNX (first attempt) | **0.0527** | Catastrophic failure — ~random chance |
 
@@ -274,7 +273,7 @@ Use `onnxruntime.quantization.qdq_loss_debug` to identify worst-performing layer
 
 | Variant | Recall@10 | Notes |
 |---------|-----------|-------|
-| PyTorch FP32 (local) | **0.8805** | Ground truth — `inference_local.py` |
+| PyTorch FP32 (local) | **0.8805** | Ground truth — `src/local/inference_pytorch.py` |
 | FP32 ONNX (local ORT) | **0.8728** | Small gap from PIL box resize vs bicubic+centercrop |
 | INT8 ONNX — attempt 1 (QDQ + all ops) | **0.0527** | Catastrophic — raw int8 output leak |
 | INT8 ONNX — attempt 2 (QOperator, all ops) | **0.1003** | Still catastrophic — Softmax/LayerNorm poisoned |

@@ -19,7 +19,7 @@ import onnx
 import qai_hub
 import numpy as np
 
-from inference import evaluate_track1
+from src.common.eval import evaluate_track1
 
 # ---------------------------------------------------------------------------
 # Args

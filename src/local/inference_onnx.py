@@ -30,7 +30,7 @@ import onnxruntime as ort
 sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
-from inference import evaluate_track1
+from src.common.eval import evaluate_track1
 
 # --- Configuration ---
 ONNX_DIR = "exported_onnx"

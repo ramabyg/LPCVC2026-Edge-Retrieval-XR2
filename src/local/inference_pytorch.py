@@ -10,7 +10,7 @@ from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Interp
 sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
-from inference import evaluate_track1
+from src.common.eval import evaluate_track1
 
 parser = argparse.ArgumentParser(description="Local FP32 CLIP inference")
 parser.add_argument(

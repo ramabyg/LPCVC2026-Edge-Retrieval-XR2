@@ -28,7 +28,7 @@ import qai_hub
 import numpy as np
 from datetime import datetime
 
-from inference import evaluate_track1
+from src.common.eval import evaluate_track1
 
 # ---------------------------------------------------------------------------
 # Configuration
