@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls *.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''diagnose_device_gap.py''\\).read\\(\\)\\); print\\(''diagnose_device_gap.py: OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''evaluate_coco1k.py''\\).read\\(\\)\\); print\\(''evaluate_coco1k.py: OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''finetune_lora.py''\\).read\\(\\)\\); print\\(''finetune_lora.py: OK''\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(''merge_lora.py''\\).read\\(\\)\\); print\\(''merge_lora.py: OK''\\)\")",
+      "Bash(grep -n \"from inference import\\\\|import inference\" *.py)",
+      "Bash(mkdir -p src/common src/local/train src/platform src/debug)",
+      "Bash(touch src/__init__.py src/common/__init__.py src/local/__init__.py src/local/train/__init__.py src/platform/__init__.py src/debug/__init__.py)",
+      "Bash(python -c \":*)"
+    ]
+  }
+}
