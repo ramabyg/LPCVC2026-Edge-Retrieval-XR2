@@ -6,9 +6,16 @@ using Karpathy splits. Targets attention output projections and MLP
 layers in both image and text encoders.
 
 Usage:
+    # Single GPU
     python finetune_lora.py --epochs 3 --batch-size 64       # Quick run
     python finetune_lora.py --epochs 10 --amp                # Full training
     python finetune_lora.py --datasets both                  # COCO + Flickr30k
+
+    # Multi-GPU (same machine) — batch-size is per GPU
+    torchrun --nproc_per_node=4 finetune_lora.py --epochs 10 --batch-size 128 --amp
+
+    # Multi-node cluster (run on each node)
+    torchrun --nproc_per_node=4 --nnodes=2 --node_rank=0 --master_addr=<IP> --master_port=29500 finetune_lora.py --epochs 10
 """
 
 import sys
@@ -24,6 +31,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
+from torch.utils.data.distributed import DistributedSampler
+from torch.nn.parallel import DistributedDataParallel as DDP
+import torch.distributed as dist
 from torchvision import transforms
 from PIL import Image
 
@@ -318,8 +328,35 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(args.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info("Device: %s", device)
+    # Distributed setup — works transparently for single GPU too
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    is_distributed = world_size > 1
+
+    if is_distributed:
+        dist.init_process_group(backend="nccl")
+        device = torch.device(f"cuda:{local_rank}")
+        torch.cuda.set_device(device)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    is_main = (not is_distributed) or dist.get_rank() == 0
+
+    if is_main:
+        os.makedirs(args.save_dir, exist_ok=True)
+        log_path = os.path.join(args.save_dir, "train.log")
+        fh = logging.FileHandler(log_path, mode="a")
+        fh.setFormatter(logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        logger.addHandler(fh)
+        logger.info("Logging to: %s", log_path)
+        logger.info("Device: %s  world_size=%d", device, world_size)
+        logger.info("=== Training config ===")
+        for k, v in sorted(vars(args).items()):
+            logger.info("  %-25s %s", k, v)
+        logger.info("=======================")
 
     # ------------------------------------------------------------------
     # 1. Load CLIP model
@@ -358,15 +395,25 @@ def main():
 
     peft_model.train()
 
+    # Wrap with DDP — raw_model gives direct access to encode_image/encode_text/logit_scale
+    # DDP does not forward method calls, so we always use raw_model for those.
+    if is_distributed:
+        peft_model = DDP(peft_model, device_ids=[local_rank], find_unused_parameters=True)
+        raw_model = peft_model.module
+    else:
+        raw_model = peft_model
+
     # ------------------------------------------------------------------
     # 3. Build datasets and dataloaders
     # ------------------------------------------------------------------
     train_dataset, val_dataset = build_datasets(args)
 
+    train_sampler = DistributedSampler(train_dataset, shuffle=True) if is_distributed else None
     train_loader = DataLoader(
         train_dataset,
         batch_size=args.batch_size,
-        shuffle=True,
+        shuffle=(train_sampler is None),
+        sampler=train_sampler,
         num_workers=args.num_workers,
         pin_memory=True,
         drop_last=args.drop_last,
@@ -419,6 +466,9 @@ def main():
         epoch_samples = 0
         t_start = time.time()
 
+        if train_sampler is not None:
+            train_sampler.set_epoch(epoch)
+
         for batch_idx, (images, tokens) in enumerate(train_loader):
             images = images.to(device, non_blocking=True)
             tokens = tokens.to(device, non_blocking=True)
@@ -431,9 +481,9 @@ def main():
             optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast("cuda", enabled=args.amp):
-                img_feat = peft_model.encode_image(images).float()
-                txt_feat = peft_model.encode_text(tokens).float()
-                logit_scale = peft_model.logit_scale.exp()
+                img_feat = raw_model.encode_image(images).float()
+                txt_feat = raw_model.encode_text(tokens).float()
+                logit_scale = raw_model.logit_scale.exp()
                 loss = infonce_loss(img_feat, txt_feat, logit_scale)
 
             scaler.scale(loss).backward()
@@ -442,15 +492,15 @@ def main():
 
             # Clamp logit_scale after optimizer step
             with torch.no_grad():
-                peft_model.logit_scale.clamp_(0.0, args.logit_scale_clamp)
+                raw_model.logit_scale.clamp_(0.0, args.logit_scale_clamp)
 
             batch_size = images.size(0)
             epoch_loss += loss.item() * batch_size
             epoch_samples += batch_size
             global_step += 1
 
-            # Log every 50 steps
-            if global_step % 50 == 0:
+            # Log every 50 steps (rank 0 only)
+            if global_step % 50 == 0 and is_main:
                 elapsed = time.time() - t_start
                 throughput = epoch_samples / max(elapsed, 1e-6)
                 logger.info(
@@ -458,27 +508,28 @@ def main():
                     "throughput=%.1f img/s",
                     epoch, batch_idx + 1, len(train_loader),
                     loss.item(), lr_main,
-                    peft_model.logit_scale.item(),
+                    raw_model.logit_scale.item(),
                     throughput,
                 )
 
-        # End of epoch
-        epoch_time = time.time() - t_start
-        avg_loss = epoch_loss / max(epoch_samples, 1)
-        throughput = epoch_samples / max(epoch_time, 1e-6)
-        logger.info(
-            "Epoch %d complete  avg_loss=%.4f  logit_scale=%.3f  "
-            "time=%.1fs  throughput=%.1f img/s",
-            epoch, avg_loss, peft_model.logit_scale.item(),
-            epoch_time, throughput,
-        )
+        # End of epoch (rank 0 only)
+        if is_main:
+            epoch_time = time.time() - t_start
+            avg_loss = epoch_loss / max(epoch_samples, 1)
+            throughput = epoch_samples / max(epoch_time, 1e-6)
+            logger.info(
+                "Epoch %d complete  avg_loss=%.4f  logit_scale=%.3f  "
+                "time=%.1fs  throughput=%.1f img/s",
+                epoch, avg_loss, raw_model.logit_scale.item(),
+                epoch_time, throughput,
+            )
 
         # ------------------------------------------------------------------
-        # 6. Validation
+        # 6. Validation (rank 0 only — avoids redundant work across GPUs)
         # ------------------------------------------------------------------
-        if epoch % args.eval_every == 0:
+        if epoch % args.eval_every == 0 and is_main:
             logger.info("Running validation...")
-            r1, r5, r10 = validate(peft_model, val_loader, device)
+            r1, r5, r10 = validate(raw_model, val_loader, device)
             logger.info(
                 "Val  Recall@1=%.2f  Recall@5=%.2f  Recall@10=%.2f",
                 r1, r5, r10,
@@ -491,7 +542,7 @@ def main():
                 # Save best checkpoint
                 best_dir = os.path.join(args.save_dir, "best")
                 os.makedirs(best_dir, exist_ok=True)
-                peft_model.save_pretrained(best_dir)
+                raw_model.save_pretrained(best_dir)
                 logger.info("New best R@10=%.2f — saved to %s", r10, best_dir)
             else:
                 patience_counter += 1
@@ -505,15 +556,20 @@ def main():
                 break
 
         # ------------------------------------------------------------------
-        # 7. Save epoch checkpoint
+        # 7. Save epoch checkpoint (rank 0 only)
         # ------------------------------------------------------------------
-        epoch_dir = os.path.join(args.save_dir, f"epoch_{epoch}")
-        os.makedirs(epoch_dir, exist_ok=True)
-        peft_model.save_pretrained(epoch_dir)
-        logger.info("Saved checkpoint: %s", epoch_dir)
+        if is_main:
+            epoch_dir = os.path.join(args.save_dir, f"epoch_{epoch}")
+            os.makedirs(epoch_dir, exist_ok=True)
+            raw_model.save_pretrained(epoch_dir)
+            logger.info("Saved checkpoint: %s", epoch_dir)
 
-    logger.info("Training complete. Best val Recall@10: %.2f", best_r10)
-    logger.info("Best checkpoint: %s", os.path.join(args.save_dir, "best"))
+    if is_main:
+        logger.info("Training complete. Best val Recall@10: %.2f", best_r10)
+        logger.info("Best checkpoint: %s", os.path.join(args.save_dir, "best"))
+
+    if is_distributed:
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":
