@@ -17,7 +17,6 @@ import argparse
 import torch
 import torch.nn.functional as F
 
-sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
 from peft import PeftModel

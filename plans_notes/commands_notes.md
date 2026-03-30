@@ -249,3 +249,21 @@ Compiler does not fuse/eliminate intermediate buffers.
 QAI Hub compiler does not support QOperator format — only QDQ is accepted.
 
 **ViT-L/14 verdict:** 121ms+ at any precision, 4.5× over 35ms budget. Abandoned for on-device.
+
+# Rerun as per Optimization Plan V3
+```
+Model:        ViT-B/16  FP32
+Recall@10:    0.8805
+Image compile job: jgzx74nk5
+Text  compile job: jp27mvqr5
+Image profile job: jpr4ynz7g
+Text  profile job: jpy4d79lp
+Img Inference Job ID: jp8374log
+Txt Inference Job ID: jpy4d7elp
+```
+```
+==================================================
+Recall@10 Results — ViT-B/16 ONNX, local , FP32
+==================================================
+  FP32                       0.8728
+```

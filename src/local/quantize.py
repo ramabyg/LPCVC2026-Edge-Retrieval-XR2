@@ -40,7 +40,6 @@ import numpy as np
 import pandas as pd
 from PIL import Image
 
-sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
 from onnxruntime.quantization import (

@@ -27,7 +27,6 @@ from PIL import Image
 
 import onnxruntime as ort
 
-sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
 from src.common.eval import evaluate_track1

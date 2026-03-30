@@ -27,7 +27,6 @@ from torch.utils.data import Dataset, DataLoader, ConcatDataset
 from torchvision import transforms
 from PIL import Image
 
-sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
 from peft import LoraConfig, get_peft_model

@@ -7,7 +7,6 @@ import pandas as pd
 from PIL import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, InterpolationMode
 
-sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
 from src.common.eval import evaluate_track1

@@ -28,7 +28,6 @@ from torchvision.transforms import (
     Compose, Resize, CenterCrop, ToTensor, Normalize, InterpolationMode,
 )
 
-sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
 # ---------------------------------------------------------------------------

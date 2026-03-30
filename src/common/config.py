@@ -43,8 +43,8 @@ CHECKPOINTS_DIR = "lora_checkpoints"
 
 # ── QAI Hub ───────────────────────────────────────────────────────────────────
 DEVICE_NAME              = os.environ.get("QAI_HUB_DEVICE",         "XR2 Gen 2 (Proxy)")
-DEFAULT_IMAGE_DATASET_ID = os.environ.get("QAI_HUB_IMAGE_DATASET",  "d2ne8er12")
-DEFAULT_TEXT_DATASET_ID  = os.environ.get("QAI_HUB_TEXT_DATASET",   "d70krkm59")
+DEFAULT_IMAGE_DATASET_ID = os.environ.get("QAI_HUB_IMAGE_DATASET",  "d91y6v3n9")
+DEFAULT_TEXT_DATASET_ID  = os.environ.get("QAI_HUB_TEXT_DATASET",   "d74j38p07")
 
 # ── CLIP model ────────────────────────────────────────────────────────────────
 CLIP_MEAN     = (0.48145466, 0.4578275,  0.40821073)

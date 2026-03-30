@@ -3,7 +3,6 @@ import argparse
 import torch
 import os
 
-sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
 from src.common.config import ONNX_DIR
