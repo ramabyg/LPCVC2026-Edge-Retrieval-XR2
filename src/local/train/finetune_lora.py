@@ -126,9 +126,14 @@ class CaptionDataset(Dataset):
         for entry in data["images"]:
             if entry["split"] not in target_splits:
                 continue
-            # Resolve image path: try "filepath" first, then "filename"
-            rel_path = entry.get("filepath", entry.get("filename", ""))
-            img_path = os.path.join(image_root, rel_path)
+            # Karpathy JSON: "filepath" = subdirectory (e.g. "train2014"),
+            # "filename" = image file name. Join both when "filepath" is present.
+            filepath = entry.get("filepath", "")
+            filename = entry.get("filename", "")
+            if filepath and filename:
+                img_path = os.path.join(image_root, filepath, filename)
+            else:
+                img_path = os.path.join(image_root, filepath or filename)
             captions = [s["raw"] for s in entry["sentences"]]
             if captions:
                 self.samples.append((img_path, captions))
@@ -487,7 +492,21 @@ def main():
                 loss = infonce_loss(img_feat, txt_feat, logit_scale)
 
             scaler.scale(loss).backward()
-            scaler.step(optimizer)
+            # Unscale before clipping so clip operates on true gradient magnitudes
+            scaler.unscale_(optimizer)
+            grad_norm = torch.nn.utils.clip_grad_norm_(peft_model.parameters(), max_norm=1.0)
+            # Bug 4 fix: sync gradient validity across ranks so all ranks either
+            # step or skip together (prevents weight divergence on AMP overflow).
+            if is_distributed:
+                finite = torch.tensor(
+                    [1.0 if torch.isfinite(grad_norm) else 0.0], device=device
+                )
+                dist.all_reduce(finite, op=dist.ReduceOp.MIN)
+                all_finite = finite.item() > 0
+            else:
+                all_finite = torch.isfinite(grad_norm).item()
+            if all_finite:
+                scaler.step(optimizer)
             scaler.update()
 
             # Clamp logit_scale after optimizer step
@@ -524,6 +543,11 @@ def main():
                 epoch_time, throughput,
             )
 
+        # Bug 2 fix: barrier so ranks 1-3 don't race into the next epoch's
+        # backward() while rank 0 is still in validation / checkpoint saving.
+        if is_distributed:
+            dist.barrier()
+
         # ------------------------------------------------------------------
         # 6. Validation (rank 0 only — avoids redundant work across GPUs)
         # ------------------------------------------------------------------
@@ -551,10 +575,6 @@ def main():
                     patience_counter, args.patience,
                 )
 
-            if patience_counter >= args.patience:
-                logger.info("Early stopping triggered after %d epochs.", epoch)
-                break
-
         # ------------------------------------------------------------------
         # 7. Save epoch checkpoint (rank 0 only)
         # ------------------------------------------------------------------
@@ -563,6 +583,23 @@ def main():
             os.makedirs(epoch_dir, exist_ok=True)
             raw_model.save_pretrained(epoch_dir)
             logger.info("Saved checkpoint: %s", epoch_dir)
+
+        # Bug 1 fix: broadcast early-stop decision from rank 0 to all ranks.
+        # Without this, only rank 0 would break while others deadlock on the
+        # next epoch's backward() all-reduce after rank 0 destroys the group.
+        should_stop = torch.zeros(1, device=device)
+        if is_main and patience_counter >= args.patience:
+            logger.info("Early stopping triggered after %d epochs.", epoch)
+            should_stop.fill_(1.0)
+        if is_distributed:
+            dist.broadcast(should_stop, src=0)
+        if should_stop.item():
+            break
+
+        # Bug 2 fix (second barrier): ensure rank 0 finishes saving the epoch
+        # checkpoint before any rank starts loading data for the next epoch.
+        if is_distributed:
+            dist.barrier()
 
     if is_main:
         logger.info("Training complete. Best val Recall@10: %.2f", best_r10)

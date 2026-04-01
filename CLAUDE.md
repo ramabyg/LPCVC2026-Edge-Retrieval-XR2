@@ -14,6 +14,17 @@ Recall@10: for each image, check if its ground-truth text appears in the top-10 
 | Normalization | NOT applied by competition — must be baked into the model |
 | Target device | Snapdragon XR2 Gen 2 (Hexagon NPU, optimized for INT8) |
 
+## Hardware
+
+| Role | Hardware | Notes |
+|------|----------|-------|
+| **Training** | GPU server — 4× NVIDIA H100 80GB HBM3 (CUDA 12.6) | Use for all fine-tuning, full `nproc_per_node=4` supported |
+| **Local inference / testing** | NVIDIA GTX 1650 (4GB VRAM) | Quick validation, ONNX inference, quantization tests |
+| **Target (competition)** | Qualcomm Snapdragon XR2 Gen 2 (Hexagon NPU) | On-device via QAI Hub |
+
+- Run `torchrun --nproc_per_node=4` on the GPU server for multi-GPU training.
+- Use the GTX 1650 locally only for `inference_pytorch.py`, `inference_onnx_local.py`, and quick sanity checks.
+
 ## Current Baseline (March 2026)
 
 | Model | Image enc (ms) | Text enc (ms) | Total | Status |
@@ -95,7 +106,7 @@ result = evaluate_track1(img_output, txt_output, TXT_LIST_PATH, IMG_LIST_PATH)
 2. **Re-export ONNX + compile + run on-device** → verify local ≈ on-device Recall@10
 3. **INT8 quantize ViT-B/16** on QAI Hub → profile latency, check Recall@10
 4. **Profile ViT-L/14** (FP32 + INT8) → if fits under 35ms, switch to larger model
-5. **Fine-tune on COCO + Flickr30k** → LoRA first (works on GTX 1650), full fine-tune with better GPU
+5. **Fine-tune on COCO + Flickr30k** → LoRA + full fine-tune on GPU server (4× H100); GTX 1650 for local inference only
 6. **Knowledge distillation** from ViT-L/14 → ViT-B/16 if ViT-L/14 too slow on-device
 
 Full plan: `CLIP_Optimization_Plan_v2.md`

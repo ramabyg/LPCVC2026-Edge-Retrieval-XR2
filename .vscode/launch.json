@@ -12,6 +12,15 @@
             "program": "${workspaceFolder}/inference_local.py",
             "console": "integratedTerminal",
             "stopOnEntry": true
+        },
+        {
+            "name": "finetune lora",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/local/train/finetune_lora.py",
+            "console": "integratedTerminal",
+            "args": ["--epochs", "3", "--batch-size", "64"],
+            "stopOnEntry": true
         }
     ]
 }

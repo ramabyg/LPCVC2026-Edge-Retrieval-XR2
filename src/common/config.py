@@ -21,25 +21,25 @@ import os
 # ── Sample dataset (competition data) ────────────────────────────────────────
 SAMPLE_DATA_DIR = os.environ.get(
     "LPCVC_DATA_DIR",
-    r"C:\rama\projects\data\lpcvc_track1_sample_data",
+    r"/mnt/sandbox/ryara/datasets/lpcvc_track1_sample_data",
 )
 IMAGE_DIR = os.path.join(SAMPLE_DATA_DIR, "images")
 IMG_LIST  = os.path.join(SAMPLE_DATA_DIR, "img_list.csv")
 TXT_LIST  = os.path.join(SAMPLE_DATA_DIR, "txt_list.csv")
 
 # ── Training datasets ─────────────────────────────────────────────────────────
-COCO_DATA_DIR    = os.environ.get("LPCVC_COCO_DIR",     r"C:\rama\projects\data\coco")
-FLICKR30K_DIR    = os.environ.get("LPCVC_FLICKR30K_DIR", r"C:\rama\projects\data\flickr30k")
+COCO_DATA_DIR    = os.environ.get("LPCVC_COCO_DIR",     r"/mnt/sandbox/ryara/datasets/coco")
+FLICKR30K_DIR    = os.environ.get("LPCVC_FLICKR30K_DIR", r"/mnt/sandbox/ryara/datasets/flickr30k")
 
 COCO_JSON         = os.path.join(COCO_DATA_DIR, "dataset_coco.json")
 FLICKR30K_JSON    = os.path.join(FLICKR30K_DIR, "dataset_flickr30k.json")
 FLICKR30K_IMG_DIR = os.path.join(FLICKR30K_DIR, "images")
 
 # ── Output directories ────────────────────────────────────────────────────────
-ONNX_DIR        = "exported_onnx"
-PROFILE_LOG_DIR = "profile_logs"
-DIAGNOSTICS_DIR = "diagnostics"
-CHECKPOINTS_DIR = "lora_checkpoints"
+ONNX_DIR        = "/mnt/artifacts/ryara/lpcvc/exported_onnx"
+PROFILE_LOG_DIR = "/mnt/artifacts/ryara/lpcvc/profile_logs"
+DIAGNOSTICS_DIR = "/mnt/artifacts/ryara/lpcvc/diagnostics"
+CHECKPOINTS_DIR = "/mnt/artifacts/ryara/lpcvc/lora_checkpoints"
 
 # ── QAI Hub ───────────────────────────────────────────────────────────────────
 DEVICE_NAME              = os.environ.get("QAI_HUB_DEVICE",         "XR2 Gen 2 (Proxy)")
@@ -59,5 +59,5 @@ def ensure_output_dirs():
     Call once at the top of any script that reads/writes output folders.
     Safe to call multiple times (exist_ok=True).
     """
-    for d in [ONNX_DIR, PROFILE_LOG_DIR, DIAGNOSTICS_DIR]:
+    for d in [ONNX_DIR, PROFILE_LOG_DIR, DIAGNOSTICS_DIR, CHECKPOINTS_DIR]:
         os.makedirs(d, exist_ok=True)
