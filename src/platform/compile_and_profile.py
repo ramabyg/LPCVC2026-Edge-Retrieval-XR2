@@ -15,9 +15,9 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-# --- Configuration ---
-ONNX_DIR = "exported_onnx"
-# ---------------------
+from src.common.config import ONNX_DIR, DEVICE_NAME, ensure_output_dirs
+
+ensure_output_dirs()
 
 def run_profile(model, device):
     """Submit a profile job for the model."""
@@ -81,7 +81,7 @@ except onnx.checker.ValidationError as e:
     print("Text ONNX model validation failed ❌")
     print(e)
 
-target_device = qai_hub.Device("XR2 Gen 2 (Proxy)")
+target_device = qai_hub.Device(DEVICE_NAME)
 
 # Submit compilation jobs
 print("\nSubmitting compilation jobs to QAI Hub...")

@@ -1,0 +1,68 @@
+# environment.yml
+# Usage:
+#   Create:  conda env create -f environment.yml
+#   Update:  conda env update -f environment.yml --prune
+#   Activate: conda activate my-project
+#   Export your current env state (for sharing/locking versions)
+#   conda env export > environment.lock.yml
+
+name: lpcvc  # <-- project name
+
+channels:
+
+  - conda-forge   # Community-maintained, more up-to-date than defaults
+  - nvidia
+  - pytorch
+
+dependencies:
+  # ── Python version ────────────────────────────────────────────────
+
+  - python=3.13  # Pin to a specific version for reproducibility
+
+  # ── Core scientific stack (via conda) ─────────────────────────────
+
+  - numpy
+  - pandas
+  - scikit-learn
+  - matplotlib
+  - seaborn
+  - jupyter
+  - ipykernel       # Needed to register this env as a Jupyter kernel
+
+  # ── Dev tools (via conda) ─────────────────────────────────────────
+
+  - pip             # Always include pip explicitly
+  - black           # Code formatter
+  - flake8          # Linter
+  - pytest          # Testing
+
+  # ── GPU / PyTorch packages (via pip) ──────────────────────────────
+  # NOTE: Always use pip for GPU packages — never conda install torch
+  # Match the --index-url to your container's CUDA version
+
+  - pip:
+    - torch --index-url https://download.pytorch.org/whl/cu126
+    - torchvision --index-url https://download.pytorch.org/whl/cu126
+    - torchaudio --index-url https://download.pytorch.org/whl/cu126
+
+    # ── Add your project-specific packages below ───────────────────
+    - transformers      # HuggingFace models
+    # - datasets          # HuggingFace datasets
+    # - accelerate        # Multi-GPU training
+    # - wandb             # Experiment tracking
+    # - mlflow            # Experiment tracking (alternative)
+    # - opencv-python     # Computer vision
+    # - pillow            # Image processing
+    # - tqdm              # Progress bars
+    # - pydantic          # Data validation
+    # - fastapi           # API serving
+    # - uvicorn           # ASGI server for FastAPI
+    # - boto3             # AWS S3 access
+    # - hydra-core        # Config management
+    - setuptools
+    - qai_hub
+    - qai_hub_models
+    - onnxscript
+    - onnxruntime
+    - peft>=0.10.0
+    - accelerate>=0.27.0

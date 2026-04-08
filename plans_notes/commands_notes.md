@@ -240,6 +240,165 @@ QAI Hub compiler does not support QOperator format — only QDQ is accepted.
 
 **ViT-L/14 verdict:** 121ms+ at any precision, 4.5× over 35ms budget. Abandoned for on-device.
 
+# Rerun as per Optimization Plan V3
+```
+Model:        ViT-B/16  FP32
+Recall@10:    0.8805
+Image compile job: jgzx74nk5
+Text  compile job: jp27mvqr5
+Image profile job: jpr4ynz7g
+Text  profile job: jpy4d79lp
+Img Inference Job ID: jp8374log
+Txt Inference Job ID: jpy4d7elp
+```
+```
+==================================================
+Recall@10 Results — ViT-B/16 ONNX, local , FP32
+==================================================
+  FP32                       0.8728
+```
+
+# Fine Tuning and Merging Plan
+Plan: Load Fine-Tuned LoRA Weights into CLIP Pipeline
+
+ Context
+
+ Fine-tuned LoRA weights are saved in PEFT format at checkpoints/lora_checkpoints_best/best/ (adapter only, ~5.9 MB). The training achieved    
+ 97.20 Recall@10 on the validation set.
+
+ The current inference_pytorch.py and export_onnx.py both load the base CLIP model only — neither loads the fine-tuned weights. To use the     
+ improved model end-to-end (local test → ONNX export → on-device), we need to:
+ 1. Merge LoRA weights into the base model (one-time step, already scripted)
+ 2. Add a --weights flag to inference_pytorch.py and export_onnx.py to load the merged checkpoint
+
+ Merging (not just loading adapter) is required because:
+ - ONNX export cannot trace through the PEFT wrapper cleanly
+ - Merged weights are a plain CLIP state dict — drop-in for load_state_dict()
+
+ ---
+ Step 1: Merge LoRA Weights
+
+ Run the existing merge_lora.py script to bake LoRA adapter weights into base CLIP:
+
+ cd C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\.claude\worktrees\condescending-mcnulty
+ python src/local/train/merge_lora.py \
+   --checkpoint checkpoints/lora_checkpoints_best/best \
+   --output checkpoints/merged_best.pt
+
+ Output: checkpoints/merged_best.pt — a plain PyTorch state dict with LoRA weights baked in.
+
+ ---
+ Step 2: Modify inference_pytorch.py
+
+ File: src/local/inference_pytorch.py
+
+ Add a --weights CLI argument. When provided, load the merged state dict on top of the base model.
+
+ Change (in argparse section):
+ parser.add_argument("--weights", type=str, default=None,
+                     help="Path to merged fine-tuned weights (.pt file)")
+
+ Change (in model loading section, after clip_lib.load()):
+ model, _ = clip_lib.load(MODEL, device=device)
+ model = model.float()
+
+ if args.weights:
+     state = torch.load(args.weights, map_location=device)
+     model.load_state_dict(state, strict=False)
+     print(f"Loaded fine-tuned weights from: {args.weights}")
+
+ model.eval()
+
+ Usage:
+ python src/local/inference_pytorch.py --weights checkpoints/merged_best.pt
+
+ ---
+ Step 3: Modify export_onnx.py
+
+ File: src/platform/export_onnx.py
+
+ Same pattern — add --weights flag to load merged checkpoint before wrapping and exporting.
+
+ Change (in argparse section):
+ parser.add_argument("--weights", type=str, default=None,
+                     help="Path to merged fine-tuned weights (.pt file)")
+
+ Change (in model loading section, after clip_lib.load()):
+ clip_model, _ = clip_lib.load(args.model, device=device)
+ clip_model = clip_model.to(torch.float32)
+
+ if args.weights:
+     state = torch.load(args.weights, map_location=device)
+     clip_model.load_state_dict(state, strict=False)
+     print(f"Loaded fine-tuned weights from: {args.weights}")
+
+ clip_model.eval()
+
+ Usage:
+ python src/platform/export_onnx.py --weights checkpoints/merged_best.pt
+
+ ---
+ Full Workflow After Implementation
+
+ Phase 1: Local validation (57 samples)
+
+ # Merge LoRA into base model
+ python src/local/train/merge_lora.py \
+   --checkpoint checkpoints/lora_checkpoints_best/best \
+   --output checkpoints/merged_best.pt
+
+ # Test on 57-sample dataset
+ python src/local/inference_pytorch.py --weights checkpoints/merged_best.pt
+ Expected: Recall@10 near 97.20 (may be lower since sample set ≠ training val split, but should exceed 0.8805 baseline).
+
+ Phase 2: ONNX export with fine-tuned weights
+
+ python src/platform/export_onnx.py --weights checkpoints/merged_best.pt
+ Output: exported_onnx/image_encoder.onnx + text_encoder.onnx with fine-tuned weights.
+
+ Phase 3: Compile and profile on-device
+
+ python src/platform/compile_and_profile.py   # verify still under 35ms
+ python src/platform/upload_dataset.py         # get new dataset IDs
+ python src/platform/run_on_device.py          # get on-device Recall@10
+
+ ---
+ Critical Files
+
+ ┌─────────────────────────────────────────┬────────────────────────────────────────────┐
+ │                  File                   │                   Change                   │
+ ├─────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ src/local/inference_pytorch.py          │ Add --weights arg + load_state_dict() call │
+ ├─────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ src/platform/export_onnx.py             │ Add --weights arg + load_state_dict() call │
+ ├─────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ src/local/train/merge_lora.py           │ Run as-is (no changes needed)              │
+ ├─────────────────────────────────────────┼────────────────────────────────────────────┤
+ │ checkpoints/lora_checkpoints_best/best/ │ Source of LoRA adapter weights             │
+ └─────────────────────────────────────────┴────────────────────────────────────────────┘
+
+ Verification
+
+ 1. merge_lora.py prints cosine similarity between base and merged embeddings — should be close to 1.0 but not identical
+ 2. inference_pytorch.py prints Recall@10 — should be noticeably above 0.8805
+ 3. ONNX export completes without shape errors
+ 4. compile_and_profile.py shows latency still ≤ 35ms (LoRA adds no new ops — weights just merged)
+ 
+
+ # 04/07 After Fine Tuning, Sample dataset recall score on platform
+ ### Accuracy got improved to 0.5458839 from 0.49 after fine tuning
+ ```
+ ==================================================
+Model:        ViT-B/16  FP32
+Recall@10:    0.8909
+Image compile job: jp27vvdq5
+Text  compile job: j563dd0y5
+Image profile job: jp34wwrng
+Text  profile job: jpv199nrp
+Edge Alchemist	4/7/2026 15:10:19	****vvdq5	****dd0y5	0.5458839792	31318	26750	4568
+==================================================
+```
+
 ---
 
 ## 2026-03-17 — INT8 Clean Run (norm-baked ONNX)

@@ -19,7 +19,14 @@ import onnx
 import qai_hub
 import numpy as np
 
-from inference import evaluate_track1
+from src.common.eval import evaluate_track1
+from src.common.config import (
+    ONNX_DIR, TXT_LIST, IMG_LIST, DEVICE_NAME,
+    DEFAULT_IMAGE_DATASET_ID, DEFAULT_TEXT_DATASET_ID,
+    ensure_output_dirs,
+)
+
+ensure_output_dirs()
 
 # ---------------------------------------------------------------------------
 # Args
@@ -44,18 +51,9 @@ parser.add_argument(
 args = parser.parse_args()
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration (paths and defaults from src/common/config.py)
 # ---------------------------------------------------------------------------
-ONNX_DIR = "exported_onnx"
-DATA_DIR = r"C:\rama\projects\data\lpcvc_track1_sample_data"
-TXT_LIST = os.path.join(DATA_DIR, "txt_list.csv")
-IMG_LIST = os.path.join(DATA_DIR, "img_list.csv")
-
-TARGET_DEVICE = qai_hub.Device("XR2 Gen 2 (Proxy)")
-
-# Last known dataset IDs — override with --image-dataset-id / --text-dataset-id
-DEFAULT_IMAGE_DATASET_ID = "d2ne8er12"
-DEFAULT_TEXT_DATASET_ID  = "d70krkm59"
+TARGET_DEVICE = qai_hub.Device(DEVICE_NAME)
 
 slug       = "" if args.model == "ViT-B/16" else "_" + args.model.lower().replace("/", "").replace("-", "")
 int8_suffix = "_int8" if args.int8 else ""

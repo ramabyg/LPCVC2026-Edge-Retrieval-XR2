@@ -28,27 +28,19 @@ import qai_hub
 import numpy as np
 from datetime import datetime
 
-from inference import evaluate_track1
+from src.common.eval import evaluate_track1
+from src.common.config import (
+    ONNX_DIR, PROFILE_LOG_DIR as LOG_DIR, TXT_LIST, IMG_LIST, DEVICE_NAME,
+    DEFAULT_IMAGE_DATASET_ID, DEFAULT_TEXT_DATASET_ID, SLUG_TO_MODEL,
+    ensure_output_dirs,
+)
+
+ensure_output_dirs()
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration (paths and defaults from src/common/config.py)
 # ---------------------------------------------------------------------------
-ONNX_DIR = "exported_onnx"
-LOG_DIR  = "profile_logs"
-
-DATA_DIR = r"C:\rama\projects\data\lpcvc_track1_sample_data"
-TXT_LIST = os.path.join(DATA_DIR, "txt_list.csv")
-IMG_LIST = os.path.join(DATA_DIR, "img_list.csv")
-
-TARGET_DEVICE = qai_hub.Device("XR2 Gen 2 (Proxy)")
-
-DEFAULT_IMAGE_DATASET_ID = "d2ne8er12"
-DEFAULT_TEXT_DATASET_ID  = "d70krkm59"
-
-SLUG_TO_MODEL = {
-    "":        "ViT-B/16",
-    "_vitl14": "ViT-L/14",
-}
+TARGET_DEVICE = qai_hub.Device(DEVICE_NAME)
 
 # ---------------------------------------------------------------------------
 # Helpers (self-contained — not imported from run_on_device.py)

@@ -7,25 +7,23 @@ import pandas as pd
 from PIL import Image
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, InterpolationMode
 
-sys.path.insert(0, "clip_model")
 import clip as clip_lib
 
-from inference import evaluate_track1
+from src.common.eval import evaluate_track1
+from src.common.config import IMAGE_DIR, IMG_LIST, TXT_LIST, CLIP_MEAN, CLIP_STD
 
 parser = argparse.ArgumentParser(description="Local FP32 CLIP inference")
 parser.add_argument(
     "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
     help="CLIP model variant to evaluate (default: ViT-B/16)",
 )
+parser.add_argument(
+    "--weights", default=None, type=str,
+    help="Path to merged fine-tuned weights (.pt file). If omitted, uses base CLIP weights.",
+)
 args = parser.parse_args()
 
-# --- Config ---
-DATA_DIR  = r"C:\rama\projects\data\lpcvc_track1_sample_data"
-IMAGE_DIR = os.path.join(DATA_DIR, "images")
-IMG_LIST  = os.path.join(DATA_DIR, "img_list.csv")
-TXT_LIST  = os.path.join(DATA_DIR, "txt_list.csv")
-MODEL     = args.model
-# --------------
+MODEL = args.model
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
@@ -33,6 +31,11 @@ print(f"Using device: {device}")
 # 1. Load model — preprocessing is now baked into the model (normalization baked into ImageEncoderWrapper)
 print(f"Loading CLIP model ({MODEL})...")
 model, _ = clip_lib.load(MODEL, device=device)
+model = model.float()
+if args.weights:
+    state = torch.load(args.weights, map_location=device)
+    model.load_state_dict(state, strict=False)
+    print(f"Loaded fine-tuned weights from: {args.weights}")
 model.eval()
 
 # Competition-style preprocessing: resize + /255 only (normalization is baked into the model)
@@ -43,8 +46,8 @@ preprocess_competition = Compose([
 ])
 
 # CLIP-specific normalization constants — must match ImageEncoderWrapper in export_onnx.py
-MEAN = torch.tensor([0.48145466, 0.4578275, 0.40821073], device=device).reshape(1, 3, 1, 1)
-STD  = torch.tensor([0.26862954, 0.26130258, 0.27577711], device=device).reshape(1, 3, 1, 1)
+MEAN = torch.tensor(CLIP_MEAN, device=device).reshape(1, 3, 1, 1)
+STD  = torch.tensor(CLIP_STD,  device=device).reshape(1, 3, 1, 1)
 
 # 2. Load and preprocess images in img_list.csv order
 df_img = pd.read_csv(IMG_LIST)

@@ -8,3 +8,5 @@ qai_hub
 qai_hub_models
 onnxscript
 onnxruntime
+peft>=0.10.0
+accelerate>=0.27.0
