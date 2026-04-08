@@ -18,6 +18,10 @@ parser.add_argument(
     "--encoder", default="both", choices=["image", "text", "both"],
     help="Which encoder to export (default: both)",
 )
+parser.add_argument(
+    "--weights", default=None, type=str,
+    help="Path to merged fine-tuned weights (.pt file). If omitted, uses base CLIP weights.",
+)
 args = parser.parse_args()
 
 # Derive output filename suffix — ViT-B/16 keeps canonical names for backward compat
@@ -48,6 +52,10 @@ DUMMY_TEXT_INPUT = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=de
 print(f"Loading CLIP model ({args.model}) from clip_model...")
 clip_model, _ = clip_lib.load(args.model, device=device)
 clip_model = clip_model.to(torch.float32) # convert all model params to float32 type, consistent with input type in compiling and profiling via AIHub
+if args.weights:
+    state = torch.load(args.weights, map_location=device)
+    clip_model.load_state_dict(state, strict=False)
+    print(f"Loaded fine-tuned weights from: {args.weights}")
 clip_model.eval()
 
 class ImageEncoderWrapper(torch.nn.Module):

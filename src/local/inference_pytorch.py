@@ -17,6 +17,10 @@ parser.add_argument(
     "--model", default="ViT-B/16", choices=["ViT-B/16", "ViT-L/14"],
     help="CLIP model variant to evaluate (default: ViT-B/16)",
 )
+parser.add_argument(
+    "--weights", default=None, type=str,
+    help="Path to merged fine-tuned weights (.pt file). If omitted, uses base CLIP weights.",
+)
 args = parser.parse_args()
 
 MODEL = args.model
@@ -27,6 +31,11 @@ print(f"Using device: {device}")
 # 1. Load model — preprocessing is now baked into the model (normalization baked into ImageEncoderWrapper)
 print(f"Loading CLIP model ({MODEL})...")
 model, _ = clip_lib.load(MODEL, device=device)
+model = model.float()
+if args.weights:
+    state = torch.load(args.weights, map_location=device)
+    model.load_state_dict(state, strict=False)
+    print(f"Loaded fine-tuned weights from: {args.weights}")
 model.eval()
 
 # Competition-style preprocessing: resize + /255 only (normalization is baked into the model)
