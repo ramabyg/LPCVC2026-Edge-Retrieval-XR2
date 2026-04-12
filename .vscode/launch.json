@@ -6,12 +6,14 @@
     "configurations": [
 
         {
-            "name": "local_inference",
+            "name": "compile and profile",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/inference_local.py",
+            "program": "${workspaceFolder}/src/platform/compile_and_profile.py",
             "console": "integratedTerminal",
-            "stopOnEntry": true
+            "stopOnEntry": true,
+            "args": ["--precision", "int8-compile"],
+            "env": { "PYTHONPATH": "${workspaceFolder}" }
         },
         {
             "name": "finetune lora",
@@ -20,7 +22,8 @@
             "program": "${workspaceFolder}/src/local/train/finetune_lora.py",
             "console": "integratedTerminal",
             "args": ["--epochs", "3", "--batch-size", "64"],
-            "stopOnEntry": true
+            "stopOnEntry": true,
+            "env": { "PYTHONPATH": "${workspaceFolder}" }
         }
     ]
 }
