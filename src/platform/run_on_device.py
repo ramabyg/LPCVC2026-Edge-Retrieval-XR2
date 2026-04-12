@@ -6,9 +6,10 @@ Compile job IDs are wired automatically — no manual updates needed.
 
 Usage:
     python run_on_device.py                                      # ViT-B/16 FP32
+    python run_on_device.py --precision fp16                    # ViT-B/16 FP16 native
+    python run_on_device.py --precision int8-compile            # ViT-B/16 INT8 (compile-time)
+    python run_on_device.py --precision int8-local              # ViT-B/16 INT8 (local QDQ)
     python run_on_device.py --model ViT-L/14                    # ViT-L/14 FP32
-    python run_on_device.py --int8                               # ViT-B/16 INT8
-    python run_on_device.py --model ViT-L/14 --int8             # ViT-L/14 INT8
     python run_on_device.py --image-dataset-id dXXX --text-dataset-id dXXX  # custom datasets
 """
 
@@ -38,7 +39,18 @@ parser.add_argument(
 )
 parser.add_argument(
     "--int8", action="store_true",
-    help="Use INT8 QDQ ONNX models (run quantize_local.py --format qdq first)",
+    help="(Legacy) Use INT8 QDQ ONNX models. Prefer --precision int8-local instead.",
+)
+parser.add_argument(
+    "--precision", default=None,
+    choices=["fp32", "fp16", "int8-compile", "int8-local"],
+    help=(
+        "Precision mode for compilation:\n"
+        "  fp32         — default, no extra flags\n"
+        "  fp16         — native FP16 on Hexagon HTP\n"
+        "  int8-compile — QAI Hub handles quantization at compile time\n"
+        "  int8-local   — use locally quantized QDQ ONNX (same as --int8)"
+    ),
 )
 parser.add_argument(
     "--image-dataset-id", default=None,
@@ -55,8 +67,12 @@ args = parser.parse_args()
 # ---------------------------------------------------------------------------
 TARGET_DEVICE = qai_hub.Device(DEVICE_NAME)
 
+# Resolve --int8 legacy flag into --precision
+if args.precision is None:
+    args.precision = "int8-local" if args.int8 else "fp32"
+
 slug       = "" if args.model == "ViT-B/16" else "_" + args.model.lower().replace("/", "").replace("-", "")
-int8_suffix = "_int8" if args.int8 else ""
+int8_suffix = "_int8" if args.precision == "int8-local" else ""
 
 IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}{int8_suffix}.onnx")
 TEXT_ONNX_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}{int8_suffix}.onnx")
@@ -83,12 +99,25 @@ def clean_value_info(model):
     return model
 
 
+def get_compile_options(precision):
+    """Return QAI Hub compile options based on precision mode."""
+    base = "--target_runtime qnn_dlc --truncate_64bit_io"
+    if precision == "fp16":
+        return f"{base} --qnn_options default_graph_htp_precision=FLOAT16"
+    elif precision == "int8-compile":
+        return f"{base} --quantize_full_type int8"
+    else:  # fp32, int8-local
+        return base
+
+
 def compile_and_wait(model, input_specs):
+    options = get_compile_options(args.precision)
+    print(f"  Compile options: {options}")
     job = qai_hub.submit_compile_job(
         model=model,
         device=TARGET_DEVICE,
         input_specs=input_specs,
-        options="--target_runtime qnn_dlc --truncate_64bit_io",
+        options=options,
     )
     print(f"  Compile job submitted: {job.job_id}  (waiting...)")
     job.wait()
@@ -155,7 +184,7 @@ def print_profile_summary(name, profile_job):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-print(f"\nModel: {args.model}  INT8: {args.int8}")
+print(f"\nModel: {args.model}  Precision: {args.precision}")
 print(f"Image ONNX: {IMAGE_ONNX_PATH}")
 print(f"Text  ONNX: {TEXT_ONNX_PATH}")
 print(f"Image dataset: {image_dataset_id}")
@@ -218,7 +247,7 @@ print_profile_summary("Text encoder",  txt_profile_job)
 
 # --- Summary ---
 print("\n" + "=" * 50)
-print(f"Model:        {args.model}  {'INT8' if args.int8 else 'FP32'}")
+print(f"Model:        {args.model}  {args.precision}")
 print(f"Recall@10:    {recall:.4f}")
 print(f"Image compile job: {img_compile_job.job_id}")
 print(f"Text  compile job: {txt_compile_job.job_id}")

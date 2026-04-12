@@ -11,9 +11,24 @@ parser.add_argument(
 )
 parser.add_argument(
     "--int8", action="store_true",
-    help="Compile INT8 QDQ ONNX models (run quantize_local.py --format qdq first)",
+    help="(Legacy) Compile INT8 QDQ ONNX models. Prefer --precision int8-local instead.",
+)
+parser.add_argument(
+    "--precision", default=None,
+    choices=["fp32", "fp16", "int8-compile", "int8-local"],
+    help=(
+        "Precision mode for compilation:\n"
+        "  fp32         — default, no extra flags\n"
+        "  fp16         — native FP16 on Hexagon HTP (--qnn_options default_graph_htp_precision=FLOAT16)\n"
+        "  int8-compile — QAI Hub handles quantization at compile time (--quantize_full_type int8)\n"
+        "  int8-local   — use locally quantized QDQ ONNX (same as --int8)"
+    ),
 )
 args = parser.parse_args()
+
+# Resolve --int8 legacy flag into --precision
+if args.precision is None:
+    args.precision = "int8-local" if args.int8 else "fp32"
 
 from src.common.config import ONNX_DIR, DEVICE_NAME, ensure_output_dirs
 
@@ -28,13 +43,26 @@ def run_profile(model, device):
     )
     return profile_job.job_id
 
-def compile_model(model, device, input_specs):
+def get_compile_options(precision):
+    """Return QAI Hub compile options based on precision mode."""
+    base = "--target_runtime qnn_dlc --truncate_64bit_io"
+    if precision == "fp16":
+        return f"{base} --qnn_options default_graph_htp_precision=FLOAT16"
+    elif precision == "int8-compile":
+        return f"{base} --quantize_full_type int8"
+    else:  # fp32, int8-local (QDQ ONNX already quantized)
+        return base
+
+
+def compile_model(model, device, input_specs, precision="fp32"):
     """Submits a compile job for the model and waits for completion."""
+    options = get_compile_options(precision)
+    print(f"  Compile options: {options}")
     compile_job = qai_hub.submit_compile_job(
         model=model,
         device=device,
         input_specs=input_specs,
-        options="--target_runtime qnn_dlc --truncate_64bit_io"
+        options=options,
     )
     compile_job.wait()
     return compile_job
@@ -45,7 +73,8 @@ if args.model == "ViT-B/16":
 else:
     slug = "_" + args.model.lower().replace("/", "").replace("-", "")  # "_vitl14"
 
-int8_suffix = "_int8" if args.int8 else ""
+# For int8-local, use locally quantized QDQ ONNX; all others use FP32 ONNX
+int8_suffix = "_int8" if args.precision == "int8-local" else ""
 IMAGE_ONNX_PATH = os.path.join(ONNX_DIR, f"image_encoder{slug}{int8_suffix}.onnx")
 TEXT_ONNX_PATH  = os.path.join(ONNX_DIR, f"text_encoder{slug}{int8_suffix}.onnx")
 
@@ -54,7 +83,7 @@ for path in [IMAGE_ONNX_PATH, TEXT_ONNX_PATH]:
         print(f"Error: {path} not found. Run export_onnx.py --model {args.model} first.")
         sys.exit(1)
 
-print(f"Model: {args.model}  INT8: {args.int8}")
+print(f"Model: {args.model}  Precision: {args.precision}")
 
 
 # Load the ONNX models from the new location
@@ -88,12 +117,14 @@ print("\nSubmitting compilation jobs to QAI Hub...")
 img_job = compile_model(
     model=onnx_img_model,
     device=target_device,
-    input_specs={"image": (1, 3, 224, 224)}
+    input_specs={"image": (1, 3, 224, 224)},
+    precision=args.precision,
 )
 txt_job = compile_model(
     model=onnx_txt_model,
     device=target_device,
-    input_specs={"text": ((1, 77), "int64")}
+    input_specs={"text": ((1, 77), "int64")},
+    precision=args.precision,
 )
 
 print(f"\n=== Job IDs ===")

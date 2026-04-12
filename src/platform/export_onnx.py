@@ -22,22 +22,27 @@ parser.add_argument(
     "--weights", default=None, type=str,
     help="Path to merged fine-tuned weights (.pt file). If omitted, uses base CLIP weights.",
 )
+parser.add_argument(
+    "--dtype", default="fp32", choices=["fp32", "fp16"],
+    help="Export dtype: fp32 (default) or fp16 for native Hexagon FP16 compute.",
+)
 args = parser.parse_args()
 
 # Derive output filename suffix — ViT-B/16 keeps canonical names for backward compat
+dtype_suffix = "_fp16" if args.dtype == "fp16" else ""
 if args.model == "ViT-B/16":
-    image_onnx_path = os.path.join(ONNX_DIR, "image_encoder.onnx")
-    text_onnx_path  = os.path.join(ONNX_DIR, "text_encoder.onnx")
+    image_onnx_path = os.path.join(ONNX_DIR, f"image_encoder{dtype_suffix}.onnx")
+    text_onnx_path  = os.path.join(ONNX_DIR, f"text_encoder{dtype_suffix}.onnx")
 else:
     slug = args.model.lower().replace("/", "").replace("-", "")  # "vitl14"
-    image_onnx_path = os.path.join(ONNX_DIR, f"image_encoder_{slug}.onnx")
-    text_onnx_path  = os.path.join(ONNX_DIR, f"text_encoder_{slug}.onnx")
+    image_onnx_path = os.path.join(ONNX_DIR, f"image_encoder_{slug}{dtype_suffix}.onnx")
+    text_onnx_path  = os.path.join(ONNX_DIR, f"text_encoder_{slug}{dtype_suffix}.onnx")
 
 # -----------------------------
 # 1. Prepare Environment
 # -----------------------------
 os.makedirs(ONNX_DIR, exist_ok=True)
-print(f"Model:  {args.model}")
+print(f"Model:  {args.model}  Dtype: {args.dtype}")
 print(f"Saving ONNX files to directory: {os.path.abspath(ONNX_DIR)}")
 
 # -----------------------------
@@ -51,7 +56,8 @@ DUMMY_TEXT_INPUT = torch.randint(0, 49408, (1, 77), dtype=torch.int64, device=de
 # -----------------------------
 print(f"Loading CLIP model ({args.model}) from clip_model...")
 clip_model, _ = clip_lib.load(args.model, device=device)
-clip_model = clip_model.to(torch.float32) # convert all model params to float32 type, consistent with input type in compiling and profiling via AIHub
+export_dtype = torch.float16 if args.dtype == "fp16" else torch.float32
+clip_model = clip_model.to(export_dtype)
 if args.weights:
     state = torch.load(args.weights, map_location=device)
     clip_model.load_state_dict(state, strict=False)
@@ -67,6 +73,7 @@ class ImageEncoderWrapper(torch.nn.Module):
         self.register_buffer('std',  torch.tensor([0.26862954, 0.26130258, 0.27577711]).reshape(1, 3, 1, 1))
 
     def forward(self, images):
+        images = images.to(self.mean.dtype)  # cast input to model dtype (fp16 or fp32)
         images = (images - self.mean) / self.std
         return self.visual(images)
 
