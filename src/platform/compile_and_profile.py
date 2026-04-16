@@ -29,6 +29,14 @@ parser.add_argument(
         "  int8-local   — use locally quantized QDQ ONNX (same as --int8)"
     ),
 )
+parser.add_argument(
+    "--calib-source", default=None, choices=["sample", "coco", "flickr30k"],
+    help="Calibration data source for int8-compile (default: config.py CALIBRATION_SOURCE)",
+)
+parser.add_argument(
+    "--calib-samples", type=int, default=None,
+    help="Max calibration samples to use (default: config.py CALIBRATION_N_SAMPLES)",
+)
 args = parser.parse_args()
 
 # Resolve --int8 legacy flag into --precision
@@ -36,7 +44,8 @@ if args.precision is None:
     args.precision = "int8-local" if args.int8 else "fp32"
 
 from src.common.config import ONNX_DIR, DEVICE_NAME, ensure_output_dirs
-from src.common.config import IMAGE_DIR, IMG_LIST, TXT_LIST
+from src.common.config import CALIBRATION_SOURCE, CALIBRATION_N_SAMPLES
+from src.common.calibration import load_calibration_data
 
 ensure_output_dirs()
 
@@ -59,43 +68,6 @@ def get_compile_options(precision):
     else:  # fp32, int8-local (QDQ ONNX already quantized)
         return base
 
-
-def load_calibration_data(encoder):
-    """Load sample dataset as calibration data for compile-time INT8 quantization.
-
-    Returns a dict {input_name: list[np.ndarray]} with one (1, ...) array per sample.
-    QAI Hub requires this format when --quantize_full_type is used.
-    """
-    import pandas as pd
-    from PIL import Image
-    from torchvision.transforms import Resize, CenterCrop, ToTensor, Compose
-    from torchvision.transforms import InterpolationMode
-
-    if encoder == "image":
-        preprocess = Compose([
-            Resize(224, interpolation=InterpolationMode.BICUBIC),
-            CenterCrop(224),
-            ToTensor(),  # uint8 → float32, /255 — normalization is baked into the ONNX model
-        ])
-        df = pd.read_csv(IMG_LIST)
-        samples = []
-        for fname in df.iloc[:, 0].tolist():
-            img = Image.open(os.path.join(IMAGE_DIR, fname)).convert("RGB")
-            samples.append(preprocess(img).numpy()[np.newaxis])  # (1, 3, 224, 224)
-        return {"image": samples}
-
-    elif encoder == "text":
-        # Use CLIP tokenizer — same tokenization as competition pipeline
-        clip_path = os.path.join(os.path.dirname(__file__), "..", "..", "clip_model")
-        sys.path.insert(0, clip_path)
-        import clip as clip_module
-        df = pd.read_csv(TXT_LIST)
-        texts = df.iloc[:, 1].tolist()
-        tokens = clip_module.tokenize(texts, truncate=True).numpy().astype(np.int64)  # (N, 77) int64 — matches ONNX input spec
-        return {"text": [tok[np.newaxis] for tok in tokens]}  # list of (1, 77)
-
-    else:
-        raise ValueError(f"Unknown encoder: {encoder}")
 
 
 def wait_with_status(job, label, poll_interval=15):
@@ -177,10 +149,14 @@ except onnx.checker.ValidationError as e:
 
 target_device = qai_hub.Device(DEVICE_NAME)
 
+# Resolve calibration settings: CLI args take priority, fall back to config.py defaults
+calib_source  = args.calib_source  or CALIBRATION_SOURCE
+calib_samples = args.calib_samples or CALIBRATION_N_SAMPLES
+
 # For compile-time INT8, calibration data is required — without it QAI Hub silently ignores
 # the --quantize_full_type flag and compiles as FP32.
-img_calib = load_calibration_data("image") if args.precision == "int8-compile" else None
-txt_calib = load_calibration_data("text")  if args.precision == "int8-compile" else None
+img_calib = load_calibration_data("image", calib_source, calib_samples) if args.precision == "int8-compile" else None
+txt_calib = load_calibration_data("text",  calib_source, calib_samples) if args.precision == "int8-compile" else None
 
 # Submit compilation jobs
 print("\nSubmitting compilation jobs to QAI Hub...")

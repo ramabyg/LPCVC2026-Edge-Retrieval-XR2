@@ -24,6 +24,7 @@ from src.common.eval import evaluate_track1
 from src.common.config import (
     ONNX_DIR, TXT_LIST, IMG_LIST, DEVICE_NAME,
     DEFAULT_IMAGE_DATASET_ID, DEFAULT_TEXT_DATASET_ID,
+    CALIBRATION_SOURCE, CALIBRATION_N_SAMPLES,
     ensure_output_dirs,
 )
 
@@ -60,6 +61,14 @@ parser.add_argument(
     "--text-dataset-id", default=None,
     help="QAI Hub dataset ID for text inputs (uses last known ID if omitted)",
 )
+parser.add_argument(
+    "--calib-source", default=None, choices=["sample", "coco", "flickr30k"],
+    help="Calibration data source for int8-compile (default: config.py CALIBRATION_SOURCE)",
+)
+parser.add_argument(
+    "--calib-samples", type=int, default=None,
+    help="Max calibration samples to use (default: config.py CALIBRATION_N_SAMPLES)",
+)
 args = parser.parse_args()
 
 # ---------------------------------------------------------------------------
@@ -70,6 +79,10 @@ TARGET_DEVICE = qai_hub.Device(DEVICE_NAME)
 # Resolve --int8 legacy flag into --precision
 if args.precision is None:
     args.precision = "int8-local" if args.int8 else "fp32"
+
+# Calibration settings: CLI args take priority, fall back to config.py defaults
+calib_source  = args.calib_source  or CALIBRATION_SOURCE
+calib_samples = args.calib_samples or CALIBRATION_N_SAMPLES
 
 slug       = "" if args.model == "ViT-B/16" else "_" + args.model.lower().replace("/", "").replace("-", "")
 int8_suffix = "_int8" if args.precision == "int8-local" else ""
@@ -106,18 +119,19 @@ def get_compile_options(precision):
         return f"{base} --qnn_options default_graph_htp_precision=FLOAT16"
     elif precision == "int8-compile":
         return f"{base} --quantize_full_type int8"
-    else:  # fp32, int8-local
+    else:  # fp32, int8-local (QDQ ONNX already quantized)
         return base
 
 
-def compile_and_wait(model, input_specs):
-    options = get_compile_options(args.precision)
+def compile_and_wait(model, input_specs, precision, calibration_data=None):
+    options = get_compile_options(precision)
     print(f"  Compile options: {options}")
     job = qai_hub.submit_compile_job(
         model=model,
         device=TARGET_DEVICE,
         input_specs=input_specs,
         options=options,
+        calibration_data=calibration_data,
     )
     print(f"  Compile job submitted: {job.job_id}  (waiting...)")
     job.wait()
@@ -206,11 +220,18 @@ onnx_img = clean_value_info(onnx.load(IMAGE_ONNX_PATH))
 onnx_txt = clean_value_info(onnx.load(TEXT_ONNX_PATH))
 
 # --- Step 1: Compile ---
+img_calib, txt_calib = None, None
+if args.precision == "int8-compile":
+    from src.common.calibration import load_calibration_data
+    print(f"\nLoading calibration data ({calib_source}, max {calib_samples} samples)...")
+    img_calib = load_calibration_data("image", calib_source, calib_samples)
+    txt_calib = load_calibration_data("text",  calib_source, calib_samples)
+
 print("\n=== Compiling ===")
 print("Image encoder:")
-img_compile_job = compile_and_wait(onnx_img, {"image": (1, 3, 224, 224)})
+img_compile_job = compile_and_wait(onnx_img, {"image": (1, 3, 224, 224)}, args.precision, img_calib)
 print("Text encoder:")
-txt_compile_job = compile_and_wait(onnx_txt, {"text": ((1, 77), "int64")})
+txt_compile_job = compile_and_wait(onnx_txt, {"text": ((1, 77), "int64")}, args.precision, txt_calib)
 
 img_compiled_model = img_compile_job.get_target_model()
 txt_compiled_model = txt_compile_job.get_target_model()

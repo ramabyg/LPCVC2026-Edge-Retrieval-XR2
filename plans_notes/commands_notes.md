@@ -433,3 +433,20 @@ Post-training quantization (PTQ) is not viable for CLIP on XR2 Gen 2:
 - W8A8 destroys accuracy (Recall@10: 0.88 → 0.05)
 - W8A16 not supported on device hardware
 - **Recommended path forward:** Quantization-Aware Training (QAT) or stay FP32 and improve via fine-tuning
+
+
+# Quantization with QCOM compiler instead of local quantization.
+- Use python -m src.platform.compile_and_profile --precision int8-compile  
+- It gave performance gain, latency almost reduced to half
+```
+=== Compile Job IDs ===
+Image compile job: jpr40yzvg
+Text compile  job: jgdr3vjkp
+=== Profile Job IDs ===
+Image profile job: jpx741v9g
+Text profile  job: j5mwmzrqp
+
+Img decoder - 10.2ms, 0-211MB, 440 NPUs
+Txt decoder - 4ms, 0-98MB, 445 NPUs
+
+```

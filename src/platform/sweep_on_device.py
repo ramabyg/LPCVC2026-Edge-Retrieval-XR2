@@ -32,6 +32,7 @@ from src.common.eval import evaluate_track1
 from src.common.config import (
     ONNX_DIR, PROFILE_LOG_DIR as LOG_DIR, TXT_LIST, IMG_LIST, DEVICE_NAME,
     DEFAULT_IMAGE_DATASET_ID, DEFAULT_TEXT_DATASET_ID, SLUG_TO_MODEL,
+    CALIBRATION_SOURCE, CALIBRATION_N_SAMPLES,
     ensure_output_dirs,
 )
 
@@ -62,13 +63,25 @@ def clean_value_info(model):
     return model
 
 
-def compile_and_wait(model, input_specs, label):
+def get_compile_options(precision):
+    """Return QAI Hub compile options based on precision mode."""
+    base = "--target_runtime qnn_dlc --truncate_64bit_io"
+    if precision == "fp16":
+        return f"{base} --qnn_options default_graph_htp_precision=FLOAT16"
+    elif precision == "int8-compile":
+        return f"{base} --quantize_full_type int8"
+    else:  # fp32, int8-local (QDQ ONNX already quantized)
+        return base
+
+
+def compile_and_wait(model, input_specs, label, precision="fp32", calibration_data=None):
     """Submit compile job and block until complete. Returns job or raises on failure."""
     job = qai_hub.submit_compile_job(
         model=model,
         device=TARGET_DEVICE,
         input_specs=input_specs,
-        options="--target_runtime qnn_dlc --truncate_64bit_io",
+        options=get_compile_options(precision),
+        calibration_data=calibration_data,
     )
     print(f"    [{label}] Compile job: {job.job_id}  (waiting...)")
     job.wait()
@@ -248,10 +261,33 @@ if __name__ == "__main__":
     parser.add_argument("--int8-only",  action="store_true", help="Only run INT8 models")
     parser.add_argument("--image-dataset-id", default=None)
     parser.add_argument("--text-dataset-id",  default=None)
+    parser.add_argument(
+        "--precision", default="fp32", choices=["fp32", "fp16", "int8-compile"],
+        help="Compile precision applied to FP32 pairs (int8-local pairs always compile as fp32 — they are already quantized)",
+    )
+    parser.add_argument(
+        "--calib-source", default=None, choices=["sample", "coco", "flickr30k"],
+        help="Calibration data source for int8-compile (default: config.py CALIBRATION_SOURCE)",
+    )
+    parser.add_argument(
+        "--calib-samples", type=int, default=None,
+        help="Max calibration samples to use (default: config.py CALIBRATION_N_SAMPLES)",
+    )
     args = parser.parse_args()
 
     image_dataset_id = args.image_dataset_id or DEFAULT_IMAGE_DATASET_ID
     text_dataset_id  = args.text_dataset_id  or DEFAULT_TEXT_DATASET_ID
+    calib_source     = args.calib_source     or CALIBRATION_SOURCE
+    calib_samples    = args.calib_samples    or CALIBRATION_N_SAMPLES
+
+    # Load calibration data once before the loop (only needed for int8-compile)
+    img_calib, txt_calib = None, None
+    if args.precision == "int8-compile":
+        from src.common.calibration import load_calibration_data
+        print(f"Loading calibration data ({calib_source}, max {calib_samples} samples)...")
+        img_calib = load_calibration_data("image", calib_source, calib_samples)
+        txt_calib = load_calibration_data("text",  calib_source, calib_samples)
+        print()
 
     # Log file
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -301,9 +337,14 @@ if __name__ == "__main__":
             onnx_txt = clean_value_info(onnx.load(pair["txt_path"]))
 
             # Step 2: Compile
-            print("  Compiling...")
-            img_compile = compile_and_wait(onnx_img, {"image": (1, 3, 224, 224)}, "image")
-            txt_compile = compile_and_wait(onnx_txt, {"text": ((1, 77), "int64")}, "text")
+            # int8-local pairs (fmt = "qoperator"/"qdq") have quantization baked in —
+            # compile as fp32 to avoid double-quantization; only apply --precision to FP32 ONNX
+            effective_precision = args.precision if fmt == "fp32" else "fp32"
+            pair_img_calib = img_calib if effective_precision == "int8-compile" else None
+            pair_txt_calib = txt_calib if effective_precision == "int8-compile" else None
+            print(f"  Compiling (precision={effective_precision})...")
+            img_compile = compile_and_wait(onnx_img, {"image": (1, 3, 224, 224)}, "image", effective_precision, pair_img_calib)
+            txt_compile = compile_and_wait(onnx_txt, {"text": ((1, 77), "int64")}, "text",  effective_precision, pair_txt_calib)
             row["img_compile_job"] = img_compile.job_id
             row["txt_compile_job"] = txt_compile.job_id
 
