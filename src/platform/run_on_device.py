@@ -8,6 +8,8 @@ Usage:
     python run_on_device.py                                      # ViT-B/16 FP32
     python run_on_device.py --precision fp16                    # ViT-B/16 FP16 native
     python run_on_device.py --precision int8-compile            # ViT-B/16 INT8 (compile-time)
+    python run_on_device.py --precision int8-hub                # ViT-B/16 INT8 (QAI Hub quantizer, W8A8)
+    python run_on_device.py --precision w8a16                   # ViT-B/16 W8A16 (QAI Hub quantizer)
     python run_on_device.py --precision int8-local              # ViT-B/16 INT8 (local QDQ)
     python run_on_device.py --model ViT-L/14                    # ViT-L/14 FP32
     python run_on_device.py --image-dataset-id dXXX --text-dataset-id dXXX  # custom datasets
@@ -44,12 +46,14 @@ parser.add_argument(
 )
 parser.add_argument(
     "--precision", default=None,
-    choices=["fp32", "fp16", "int8-compile", "int8-local"],
+    choices=["fp32", "fp16", "int8-compile", "int8-hub", "w8a16", "int8-local"],
     help=(
         "Precision mode for compilation:\n"
         "  fp32         — default, no extra flags\n"
         "  fp16         — native FP16 on Hexagon HTP\n"
-        "  int8-compile — QAI Hub handles quantization at compile time\n"
+        "  int8-compile — QAI Hub handles quantization at compile time (all ops)\n"
+        "  int8-hub     — 2-step: QAI Hub quantize job (W8A8) then compile\n"
+        "  w8a16        — 2-step: QAI Hub quantize job (W8A16) then compile\n"
         "  int8-local   — use locally quantized QDQ ONNX (same as --int8)"
     ),
 )
@@ -143,6 +147,50 @@ def compile_and_wait(model, input_specs, precision, calibration_data=None):
     return job
 
 
+NEEDS_QUANTIZE_JOB = {"int8-hub", "w8a16"}
+NEEDS_CALIBRATION = {"int8-compile", "int8-hub", "w8a16"}
+
+QUANTIZE_DTYPES = {
+    "int8-hub": (qai_hub.QuantizeDtype.INT8, qai_hub.QuantizeDtype.INT8),
+    "w8a16":   (qai_hub.QuantizeDtype.INT8, qai_hub.QuantizeDtype.INT16),
+}
+
+
+def quantize_and_compile(model, input_specs, precision, calibration_data):
+    """2-step pipeline: submit_quantize_job → submit_compile_job."""
+    weights_dtype, activations_dtype = QUANTIZE_DTYPES[precision]
+    print(f"  Quantize: weights={weights_dtype.name}  activations={activations_dtype.name}")
+    quant_job = qai_hub.submit_quantize_job(
+        model=model,
+        calibration_data=calibration_data,
+        weights_dtype=weights_dtype,
+        activations_dtype=activations_dtype,
+    )
+    print(f"  Quantize job submitted: {quant_job.job_id}  (waiting...)")
+    quant_job.wait()
+    status = quant_job.get_status()
+    if status.failure:
+        print(f"  Quantize FAILED: {status.message}")
+        sys.exit(1)
+    print(f"  Quantize done: {quant_job.job_id}")
+    quantized_model = quant_job.get_target_model()
+
+    compile_job = qai_hub.submit_compile_job(
+        model=quantized_model,
+        device=TARGET_DEVICE,
+        input_specs=input_specs,
+        options="--target_runtime qnn_dlc --truncate_64bit_io",
+    )
+    print(f"  Compile job submitted: {compile_job.job_id}  (waiting...)")
+    compile_job.wait()
+    status = compile_job.get_status()
+    if status.failure:
+        print(f"  Compile FAILED: {status.message}")
+        sys.exit(1)
+    print(f"  Compile done: {compile_job.job_id}")
+    return compile_job
+
+
 def submit_profile(compiled_model):
     job = qai_hub.submit_profile_job(
         model=compiled_model,
@@ -177,6 +225,9 @@ def print_profile_summary(name, profile_job):
         return
     try:
         data = profile_job.download_profile()
+        # QAI Hub SDK may return a list (one entry per graph); unwrap if so
+        if isinstance(data, list):
+            data = data[0] if data else {}
         # Total execution time is under execution_summary
         summary = data.get("execution_summary", {})
         total_ms = summary.get("estimated_inference_time_ms") or summary.get("inference_time_ms")
@@ -219,19 +270,25 @@ print("\nLoading ONNX models...")
 onnx_img = clean_value_info(onnx.load(IMAGE_ONNX_PATH))
 onnx_txt = clean_value_info(onnx.load(TEXT_ONNX_PATH))
 
-# --- Step 1: Compile ---
+# --- Step 1: Compile (or Quantize + Compile) ---
 img_calib, txt_calib = None, None
-if args.precision == "int8-compile":
+if args.precision in NEEDS_CALIBRATION:
     from src.common.calibration import load_calibration_data
     print(f"\nLoading calibration data ({calib_source}, max {calib_samples} samples)...")
     img_calib = load_calibration_data("image", calib_source, calib_samples)
     txt_calib = load_calibration_data("text",  calib_source, calib_samples)
 
-print("\n=== Compiling ===")
-print("Image encoder:")
-img_compile_job = compile_and_wait(onnx_img, {"image": (1, 3, 224, 224)}, args.precision, img_calib)
-print("Text encoder:")
-txt_compile_job = compile_and_wait(onnx_txt, {"text": ((1, 77), "int64")}, args.precision, txt_calib)
+print(f"\n=== {'Quantizing + Compiling' if args.precision in NEEDS_QUANTIZE_JOB else 'Compiling'} ===")
+if args.precision in NEEDS_QUANTIZE_JOB:
+    print("Image encoder:")
+    img_compile_job = quantize_and_compile(onnx_img, {"image": (1, 3, 224, 224)}, args.precision, img_calib)
+    print("Text encoder:")
+    txt_compile_job = quantize_and_compile(onnx_txt, {"text": ((1, 77), "int64")}, args.precision, txt_calib)
+else:
+    print("Image encoder:")
+    img_compile_job = compile_and_wait(onnx_img, {"image": (1, 3, 224, 224)}, args.precision, img_calib)
+    print("Text encoder:")
+    txt_compile_job = compile_and_wait(onnx_txt, {"text": ((1, 77), "int64")}, args.precision, txt_calib)
 
 img_compiled_model = img_compile_job.get_target_model()
 txt_compiled_model = txt_compile_job.get_target_model()

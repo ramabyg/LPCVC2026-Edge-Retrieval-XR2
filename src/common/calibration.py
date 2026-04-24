@@ -63,11 +63,38 @@ def load_calibration_data(encoder, source="sample", n_samples=None):
         with open(json_path, "r", encoding="utf-8") as fh:
             data = json.load(fh)
 
-        # COCO-style JSON: {images: [{id, file_name}], annotations: [{image_id, caption}]}
-        id2file = {img["id"]: img["file_name"] for img in data["images"]}
-        anns    = data["annotations"]  # list of {image_id, caption}
-        img_paths = [os.path.join(img_dir, id2file[a["image_id"]]) for a in anns]
-        texts     = [a["caption"] for a in anns]
+        # Karpathy split format: {images: [{filepath, filename, cocoid, split, sentences: [{raw}]}]}
+        # Use train split only for calibration diversity; filter out test/val to avoid leakage.
+        train_images = [img for img in data["images"] if img.get("split") in ("train", "restval")]
+        if not train_images:
+            # Fallback: use all images if no split info
+            train_images = data["images"]
+
+        img_paths = []
+        texts = []
+        for img in train_images:
+            if source == "coco":
+                # Images on disk use COCO 2017 numeric filename; cocoid gives the numeric ID.
+                # Check train2017/ first, then val2017/.
+                cocoid = img.get("cocoid", img.get("imgid", 0))
+                fname = f"{cocoid:012d}.jpg"
+                for subdir in ("train2017", "val2017"):
+                    candidate = os.path.join(img_dir, subdir, fname)
+                    if os.path.exists(candidate):
+                        img_path = candidate
+                        break
+                else:
+                    continue  # image not found on disk — skip
+            else:
+                # Flickr30k: FLICKR30K_IMG_DIR already points to the images/ subdirectory.
+                img_path = os.path.join(img_dir, img["filename"])
+                if not os.path.exists(img_path):
+                    continue
+
+            # One entry per sentence (multiple captions per image)
+            for sentence in img.get("sentences", []):
+                img_paths.append(img_path)
+                texts.append(sentence["raw"])
 
     else:
         raise ValueError(f"Unknown calibration source: {source!r}  (use sample | coco | flickr30k)")

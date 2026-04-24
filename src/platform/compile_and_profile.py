@@ -20,12 +20,14 @@ parser.add_argument(
 )
 parser.add_argument(
     "--precision", default=None,
-    choices=["fp32", "fp16", "int8-compile", "int8-local"],
+    choices=["fp32", "fp16", "int8-compile", "int8-hub", "w8a16", "int8-local"],
     help=(
         "Precision mode for compilation:\n"
         "  fp32         — default, no extra flags\n"
         "  fp16         — native FP16 on Hexagon HTP (--qnn_options default_graph_htp_precision=FLOAT16)\n"
         "  int8-compile — QAI Hub handles quantization at compile time (--quantize_full_type int8)\n"
+        "  int8-hub     — 2-step: QAI Hub quantize job (W8A8) then compile\n"
+        "  w8a16        — 2-step: QAI Hub quantize job (W8A16) then compile\n"
         "  int8-local   — use locally quantized QDQ ONNX (same as --int8)"
     ),
 )
@@ -89,6 +91,15 @@ def wait_with_status(job, label, poll_interval=15):
         sys.exit(1)
 
 
+NEEDS_QUANTIZE_JOB = {"int8-hub", "w8a16"}
+NEEDS_CALIBRATION = {"int8-compile", "int8-hub", "w8a16"}
+
+QUANTIZE_DTYPES = {
+    "int8-hub": (qai_hub.QuantizeDtype.INT8, qai_hub.QuantizeDtype.INT8),
+    "w8a16":   (qai_hub.QuantizeDtype.INT8, qai_hub.QuantizeDtype.INT16),
+}
+
+
 def compile_model(model, device, input_specs, precision="fp32", calibration_data=None):
     """Submits a compile job for the model and waits for completion."""
     options = get_compile_options(precision)
@@ -101,6 +112,31 @@ def compile_model(model, device, input_specs, precision="fp32", calibration_data
         calibration_data=calibration_data,
     )
     print(f"  Job submitted: {compile_job.job_id}")
+    wait_with_status(compile_job, label=compile_job.job_id)
+    return compile_job
+
+
+def quantize_and_compile_model(model, device, input_specs, precision, calibration_data):
+    """2-step pipeline: submit_quantize_job → submit_compile_job."""
+    weights_dtype, activations_dtype = QUANTIZE_DTYPES[precision]
+    print(f"  Quantize: weights={weights_dtype.name}  activations={activations_dtype.name}")
+    quant_job = qai_hub.submit_quantize_job(
+        model=model,
+        calibration_data=calibration_data,
+        weights_dtype=weights_dtype,
+        activations_dtype=activations_dtype,
+    )
+    print(f"  Quantize job submitted: {quant_job.job_id}")
+    wait_with_status(quant_job, label=f"quant-{quant_job.job_id}")
+    quantized_model = quant_job.get_target_model()
+
+    compile_job = qai_hub.submit_compile_job(
+        model=quantized_model,
+        device=device,
+        input_specs=input_specs,
+        options="--target_runtime qnn_dlc --truncate_64bit_io",
+    )
+    print(f"  Compile job submitted: {compile_job.job_id}")
     wait_with_status(compile_job, label=compile_job.job_id)
     return compile_job
 
@@ -153,27 +189,44 @@ target_device = qai_hub.Device(DEVICE_NAME)
 calib_source  = args.calib_source  or CALIBRATION_SOURCE
 calib_samples = args.calib_samples or CALIBRATION_N_SAMPLES
 
-# For compile-time INT8, calibration data is required — without it QAI Hub silently ignores
-# the --quantize_full_type flag and compiles as FP32.
-img_calib = load_calibration_data("image", calib_source, calib_samples) if args.precision == "int8-compile" else None
-txt_calib = load_calibration_data("text",  calib_source, calib_samples) if args.precision == "int8-compile" else None
+# Load calibration data for precision modes that need it
+img_calib, txt_calib = None, None
+if args.precision in NEEDS_CALIBRATION:
+    img_calib = load_calibration_data("image", calib_source, calib_samples)
+    txt_calib = load_calibration_data("text",  calib_source, calib_samples)
 
 # Submit compilation jobs
-print("\nSubmitting compilation jobs to QAI Hub...")
-img_job = compile_model(
-    model=onnx_img_model,
-    device=target_device,
-    input_specs={"image": (1, 3, 224, 224)},
-    precision=args.precision,
-    calibration_data=img_calib,
-)
-txt_job = compile_model(
-    model=onnx_txt_model,
-    device=target_device,
-    input_specs={"text": ((1, 77), "int64")},
-    precision=args.precision,
-    calibration_data=txt_calib,
-)
+print(f"\nSubmitting {'quantize + compile' if args.precision in NEEDS_QUANTIZE_JOB else 'compile'} jobs to QAI Hub...")
+if args.precision in NEEDS_QUANTIZE_JOB:
+    img_job = quantize_and_compile_model(
+        model=onnx_img_model,
+        device=target_device,
+        input_specs={"image": (1, 3, 224, 224)},
+        precision=args.precision,
+        calibration_data=img_calib,
+    )
+    txt_job = quantize_and_compile_model(
+        model=onnx_txt_model,
+        device=target_device,
+        input_specs={"text": ((1, 77), "int64")},
+        precision=args.precision,
+        calibration_data=txt_calib,
+    )
+else:
+    img_job = compile_model(
+        model=onnx_img_model,
+        device=target_device,
+        input_specs={"image": (1, 3, 224, 224)},
+        precision=args.precision,
+        calibration_data=img_calib,
+    )
+    txt_job = compile_model(
+        model=onnx_txt_model,
+        device=target_device,
+        input_specs={"text": ((1, 77), "int64")},
+        precision=args.precision,
+        calibration_data=txt_calib,
+    )
 
 print(f"\n=== Compile Job IDs ===")
 print(f"Image compile job: {img_job.job_id}")

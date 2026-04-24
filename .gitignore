@@ -6,7 +6,6 @@ build/
 __pycache__/
 dist/
 *.egg-info/
-*.log
 *.onnx
 *.pt
 *.pth

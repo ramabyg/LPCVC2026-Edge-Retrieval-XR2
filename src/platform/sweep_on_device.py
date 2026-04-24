@@ -74,6 +74,15 @@ def get_compile_options(precision):
         return base
 
 
+NEEDS_QUANTIZE_JOB = {"int8-hub", "w8a16"}
+NEEDS_CALIBRATION = {"int8-compile", "int8-hub", "w8a16"}
+
+QUANTIZE_DTYPES = {
+    "int8-hub": (qai_hub.QuantizeDtype.INT8, qai_hub.QuantizeDtype.INT8),
+    "w8a16":   (qai_hub.QuantizeDtype.INT8, qai_hub.QuantizeDtype.INT16),
+}
+
+
 def compile_and_wait(model, input_specs, label, precision="fp32", calibration_data=None):
     """Submit compile job and block until complete. Returns job or raises on failure."""
     job = qai_hub.submit_compile_job(
@@ -90,6 +99,39 @@ def compile_and_wait(model, input_specs, label, precision="fp32", calibration_da
         raise RuntimeError(f"Compile failed: {status.message}")
     print(f"    [{label}] Compile done.")
     return job
+
+
+def quantize_and_compile(model, input_specs, label, precision, calibration_data):
+    """2-step pipeline: submit_quantize_job → submit_compile_job."""
+    weights_dtype, activations_dtype = QUANTIZE_DTYPES[precision]
+    print(f"    [{label}] Quantize: weights={weights_dtype.name}  activations={activations_dtype.name}")
+    quant_job = qai_hub.submit_quantize_job(
+        model=model,
+        calibration_data=calibration_data,
+        weights_dtype=weights_dtype,
+        activations_dtype=activations_dtype,
+    )
+    print(f"    [{label}] Quantize job: {quant_job.job_id}  (waiting...)")
+    quant_job.wait()
+    status = quant_job.get_status()
+    if status.failure:
+        raise RuntimeError(f"Quantize failed: {status.message}")
+    print(f"    [{label}] Quantize done.")
+    quantized_model = quant_job.get_target_model()
+
+    compile_job = qai_hub.submit_compile_job(
+        model=quantized_model,
+        device=TARGET_DEVICE,
+        input_specs=input_specs,
+        options="--target_runtime qnn_dlc --truncate_64bit_io",
+    )
+    print(f"    [{label}] Compile job: {compile_job.job_id}  (waiting...)")
+    compile_job.wait()
+    status = compile_job.get_status()
+    if status.failure:
+        raise RuntimeError(f"Compile failed: {status.message}")
+    print(f"    [{label}] Compile done.")
+    return compile_job
 
 
 def profile_and_wait(compiled_model, label):
@@ -110,6 +152,9 @@ def profile_and_wait(compiled_model, label):
     profile_data = None
     try:
         profile_data = job.download_profile()
+        # QAI Hub SDK may return a list (one entry per graph); unwrap if so
+        if isinstance(profile_data, list):
+            profile_data = profile_data[0] if profile_data else {}
         summary = profile_data.get("execution_summary", {})
         # QAI Hub returns estimated_inference_time in microseconds
         latency_us = summary.get("estimated_inference_time")
@@ -262,7 +307,7 @@ if __name__ == "__main__":
     parser.add_argument("--image-dataset-id", default=None)
     parser.add_argument("--text-dataset-id",  default=None)
     parser.add_argument(
-        "--precision", default="fp32", choices=["fp32", "fp16", "int8-compile"],
+        "--precision", default="fp32", choices=["fp32", "fp16", "int8-compile", "int8-hub", "w8a16"],
         help="Compile precision applied to FP32 pairs (int8-local pairs always compile as fp32 — they are already quantized)",
     )
     parser.add_argument(
@@ -280,9 +325,9 @@ if __name__ == "__main__":
     calib_source     = args.calib_source     or CALIBRATION_SOURCE
     calib_samples    = args.calib_samples    or CALIBRATION_N_SAMPLES
 
-    # Load calibration data once before the loop (only needed for int8-compile)
+    # Load calibration data once before the loop
     img_calib, txt_calib = None, None
-    if args.precision == "int8-compile":
+    if args.precision in NEEDS_CALIBRATION:
         from src.common.calibration import load_calibration_data
         print(f"Loading calibration data ({calib_source}, max {calib_samples} samples)...")
         img_calib = load_calibration_data("image", calib_source, calib_samples)
@@ -336,15 +381,20 @@ if __name__ == "__main__":
             onnx_img = clean_value_info(onnx.load(pair["img_path"]))
             onnx_txt = clean_value_info(onnx.load(pair["txt_path"]))
 
-            # Step 2: Compile
+            # Step 2: Compile (or Quantize + Compile)
             # int8-local pairs (fmt = "qoperator"/"qdq") have quantization baked in —
             # compile as fp32 to avoid double-quantization; only apply --precision to FP32 ONNX
             effective_precision = args.precision if fmt == "fp32" else "fp32"
-            pair_img_calib = img_calib if effective_precision == "int8-compile" else None
-            pair_txt_calib = txt_calib if effective_precision == "int8-compile" else None
-            print(f"  Compiling (precision={effective_precision})...")
-            img_compile = compile_and_wait(onnx_img, {"image": (1, 3, 224, 224)}, "image", effective_precision, pair_img_calib)
-            txt_compile = compile_and_wait(onnx_txt, {"text": ((1, 77), "int64")}, "text",  effective_precision, pair_txt_calib)
+            pair_img_calib = img_calib if effective_precision in NEEDS_CALIBRATION else None
+            pair_txt_calib = txt_calib if effective_precision in NEEDS_CALIBRATION else None
+            use_quantize_job = effective_precision in NEEDS_QUANTIZE_JOB
+            print(f"  {'Quantizing + Compiling' if use_quantize_job else 'Compiling'} (precision={effective_precision})...")
+            if use_quantize_job:
+                img_compile = quantize_and_compile(onnx_img, {"image": (1, 3, 224, 224)}, "image", effective_precision, pair_img_calib)
+                txt_compile = quantize_and_compile(onnx_txt, {"text": ((1, 77), "int64")}, "text",  effective_precision, pair_txt_calib)
+            else:
+                img_compile = compile_and_wait(onnx_img, {"image": (1, 3, 224, 224)}, "image", effective_precision, pair_img_calib)
+                txt_compile = compile_and_wait(onnx_txt, {"text": ((1, 77), "int64")}, "text",  effective_precision, pair_txt_calib)
             row["img_compile_job"] = img_compile.job_id
             row["txt_compile_job"] = txt_compile.job_id
 
