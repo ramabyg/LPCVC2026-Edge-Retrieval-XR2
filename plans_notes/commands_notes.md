@@ -397,7 +397,6 @@ Image profile job: jp34wwrng
 Text  profile job: jpv199nrp
 Edge Alchemist	4/7/2026 15:10:19	****vvdq5	****dd0y5	0.5458839792	31318	26750	4568
 ==================================================
-```
 
 ---
 
@@ -449,4 +448,87 @@ Text profile  job: j5mwmzrqp
 Img decoder - 10.2ms, 0-211MB, 440 NPUs
 Txt decoder - 4ms, 0-98MB, 445 NPUs
 
+```
+
+
+# Fine Tuning with Lora version 2 with below parameters
+
+```
+torchrun --nproc_per_node=4 src/local/train/finetune_lora.py \
+    --datasets both \
+    --epochs 15 \
+    --batch-size 128 \
+    --lr 2e-4 \
+    --lora-r 16 \
+    --lora-alpha 32 \
+    --lora-dropout 0.05 \
+    --patience 5 \
+    --warmup-steps 500 \
+    --eval-every 1 \
+    --amp \
+    --val-max-images 1000 \
+    --save-dir lora_checkpoints_v2
+  ```
+- Merge Lora parameters and export onnx
+```
+  python -m src.local.train.merge_lora --checkpoint .\lora_checkpoints_v2\best
+  python -m src.platform.export_onnx --weights .\merged_best.pt 
+
+    # FP32 baseline
+  python -m src.platform.sweep_on_device --model ViT-B/16 --fp32-only
+
+  # INT8 via QCom compiler (same FP32 ONNX, quantized at compile time)
+  python -m src.platform.sweep_on_device --model ViT-B/16 --fp32-only --precision      
+  int8-compile
+
+  Or just use run_on_device.py directly since you only have one model:
+
+  python -m src.platform.run_on_device --model ViT-B/16 --precision fp32
+  python -m src.platform.run_on_device --model ViT-B/16 --precision int8-compile 
+
+```
+## With Lora V2 + fp32 results on platform 
+```
+==================================================
+Model:        ViT-B/16  fp32
+Recall@10:    0.8954
+Image compile job: jp1d1djnp
+Text  compile job: j57jnjnq5
+Image profile job: j5wdzd0zg
+Text  profile job: jp1d1dkkp
+==================================================
+```
+
+## With Lora V2 + fp32 performance on competation dataset.
+- Recall performance slightly degraded!!
+
+| Name | Version | Img compile ID | Txt compile ID | Recall @10 Cometative Dataset | Total inference time ms | Img inference time | txt inference time |
+|------|---------|----------------|----------------|-------------------------------|-------------------------|--------------------|--------------------|
+| Edge Alchemist | Base 3/13/26 | ****6qz65 | ****07715 | 0.492293484 | 30725 |  |  |
+| Edge Alchemist | V1 4/7/26 | ****vvdq | ****dd0y | 0.545883979 | 31318 | 26750 | 4568 |
+| Edge Alchemist | V2 4/17/26 | ****9d645 | ****zokm5 | 0.5378676295 | 34241 | 28865 | 5376 |
+
+
+# Fixing Int8 compile issue on platform
+
+- All three files pass syntax checks. Here's a summary of what was implemented:
+  Changes across 3 files (run_on_device.py, compile_and_profile.py, sweep_on_device.py                                                                               
+- 1. Added two new --precision modes: int8-hub (W8A8) and w8a16 (W8A16)                                                                 
+- 2. Added quantize_and_compile() function — 2-step pipeline using qai_hub.submit_quantize_job() then submit_compile_job()
+- 3. Updated calibration loading to trigger for all precision modes that need it (int8-compile, int8-hub, w8a16)
+- 4. Wired the dispatch logic: quantize modes use the new function, others use the existing compile_and_wait()
+
+- Commands to test (Experiment 1 needs no code, Experiment 2 uses the new code):
+```
+  # Experiment 1: More calibration (no code changes needed)
+  python -m src.platform.run_on_device --model ViT-B/16 --precision int8-compile --calib-source coco --calib-samples 200
+
+  # Experiment 2a: QAI Hub dedicated quantizer (W8A8)
+  python -m src.platform.run_on_device --model ViT-B/16 --precision int8-hub --calib-source coco --calib-samples 200
+
+  # Experiment 2b: QAI Hub quantizer (W8A16)
+  python -m src.platform.run_on_device --model ViT-B/16 --precision w8a16 --calib-source coco --calib-samples 200
+
+  # Experiment 3: FP16 fallback
+  python -m src.platform.run_on_device --model ViT-B/16 --precision fp16
 ```

@@ -1,0 +1,279 @@
+2026-04-13 16:30:28 [INFO] Logging to: lora_checkpoints_v2/train.log
+2026-04-13 16:30:28 [INFO] Device: cuda:0  world_size=2
+2026-04-13 16:30:28 [INFO] === Training config ===
+2026-04-13 16:30:28 [INFO]   amp                       True
+2026-04-13 16:30:28 [INFO]   batch_size                128
+2026-04-13 16:30:28 [INFO]   datasets                  both
+2026-04-13 16:30:28 [INFO]   drop_last                 True
+2026-04-13 16:30:28 [INFO]   epochs                    15
+2026-04-13 16:30:28 [INFO]   eval_every                1
+2026-04-13 16:30:28 [INFO]   logit_scale_clamp         4.6052
+2026-04-13 16:30:28 [INFO]   lora_alpha                32
+2026-04-13 16:30:28 [INFO]   lora_dropout              0.05
+2026-04-13 16:30:28 [INFO]   lora_r                    16
+2026-04-13 16:30:28 [INFO]   lr                        0.0002
+2026-04-13 16:30:28 [INFO]   lr_logit_scale            0.0001
+2026-04-13 16:30:28 [INFO]   num_workers               4
+2026-04-13 16:30:28 [INFO]   patience                  5
+2026-04-13 16:30:28 [INFO]   save_dir                  lora_checkpoints_v2
+2026-04-13 16:30:28 [INFO]   scheduler                 cosine
+2026-04-13 16:30:28 [INFO]   seed                      42
+2026-04-13 16:30:28 [INFO]   val_max_images            1000
+2026-04-13 16:30:28 [INFO]   warmup_steps              500
+2026-04-13 16:30:28 [INFO] =======================
+2026-04-13 16:30:28 [INFO] Loading CLIP ViT-B/16...
+2026-04-13 16:30:33 [INFO] Unfroze parameter: base_model.model.logit_scale
+2026-04-13 16:30:33 [INFO] Trainable parameters: 2949121 / 152569857 (1.93%)
+2026-04-13 16:30:34 [INFO] Loading Karpathy JSON: /mnt/sandbox/ryara/datasets/coco/dataset_coco.json (split=train)
+2026-04-13 16:30:37 [INFO]   Loaded 113287 images for split 'train'
+2026-04-13 16:30:37 [INFO] Train dataset 'coco': 113287 samples
+2026-04-13 16:30:37 [INFO] Loading Karpathy JSON: /mnt/sandbox/ryara/datasets/flickr30k/dataset_flickr30k.json (split=train)
+2026-04-13 16:30:38 [INFO]   Loaded 29000 images for split 'train'
+2026-04-13 16:30:38 [INFO] Train dataset 'flickr30k': 29000 samples
+2026-04-13 16:30:38 [INFO] Loading Karpathy JSON: /mnt/sandbox/ryara/datasets/coco/dataset_coco.json (split=val)
+2026-04-13 16:30:39 [INFO]   Loaded 5000 images for split 'val'
+2026-04-13 16:30:40 [INFO] Val dataset: 1000 / 5000 images (truncated)
+2026-04-13 16:30:40 [INFO] Total training steps: 8325 (555 batches x 15 epochs)
+2026-04-13 16:31:19 [INFO] Epoch 1  Step 50/555  loss=0.4680  lr=1.96e-05  logit_scale=4.605  throughput=161.3 img/s
+2026-04-13 16:31:56 [INFO] Epoch 1  Step 100/555  loss=0.2880  lr=3.96e-05  logit_scale=4.605  throughput=168.0 img/s
+2026-04-13 16:32:34 [INFO] Epoch 1  Step 150/555  loss=0.2845  lr=5.96e-05  logit_scale=4.604  throughput=168.5 img/s
+2026-04-13 16:33:12 [INFO] Epoch 1  Step 200/555  loss=0.2210  lr=7.96e-05  logit_scale=4.604  throughput=167.8 img/s
+2026-04-13 16:33:52 [INFO] Epoch 1  Step 250/555  loss=0.4508  lr=9.96e-05  logit_scale=4.604  throughput=166.5 img/s
+2026-04-13 16:34:30 [INFO] Epoch 1  Step 300/555  loss=0.1992  lr=1.20e-04  logit_scale=4.604  throughput=166.8 img/s
+2026-04-13 16:35:09 [INFO] Epoch 1  Step 350/555  loss=0.3123  lr=1.40e-04  logit_scale=4.603  throughput=166.1 img/s
+2026-04-13 16:35:46 [INFO] Epoch 1  Step 400/555  loss=0.3392  lr=1.60e-04  logit_scale=4.603  throughput=167.4 img/s
+2026-04-13 16:36:24 [INFO] Epoch 1  Step 450/555  loss=0.3260  lr=1.80e-04  logit_scale=4.603  throughput=167.1 img/s
+2026-04-13 16:37:02 [INFO] Epoch 1  Step 500/555  loss=0.2046  lr=2.00e-04  logit_scale=4.602  throughput=167.5 img/s
+2026-04-13 16:37:40 [INFO] Epoch 1  Step 550/555  loss=0.1709  lr=2.00e-04  logit_scale=4.602  throughput=167.5 img/s
+2026-04-13 16:37:43 [INFO] Epoch 1 complete  avg_loss=0.3022  logit_scale=4.602  time=423.3s  throughput=167.8 img/s
+2026-04-13 16:37:43 [INFO] Running validation...
+2026-04-13 16:37:46 [INFO] Val  Recall@1=67.10  Recall@5=91.80  Recall@10=96.60
+2026-04-13 16:37:46 [INFO] New best R@10=96.60 — saved to lora_checkpoints_v2/best
+2026-04-13 16:37:46 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_1
+2026-04-13 16:38:19 [INFO] Epoch 2  Step 45/555  loss=0.2357  lr=2.00e-04  logit_scale=4.601  throughput=174.1 img/s
+2026-04-13 16:38:54 [INFO] Epoch 2  Step 95/555  loss=0.2139  lr=2.00e-04  logit_scale=4.601  throughput=180.7 img/s
+2026-04-13 16:39:29 [INFO] Epoch 2  Step 145/555  loss=0.1724  lr=2.00e-04  logit_scale=4.600  throughput=181.1 img/s
+2026-04-13 16:40:07 [INFO] Epoch 2  Step 195/555  loss=0.3343  lr=2.00e-04  logit_scale=4.600  throughput=177.9 img/s
+2026-04-13 16:40:43 [INFO] Epoch 2  Step 245/555  loss=0.2616  lr=1.99e-04  logit_scale=4.600  throughput=177.9 img/s
+2026-04-13 16:41:21 [INFO] Epoch 2  Step 295/555  loss=0.2420  lr=1.99e-04  logit_scale=4.599  throughput=176.3 img/s
+2026-04-13 16:41:57 [INFO] Epoch 2  Step 345/555  loss=0.2089  lr=1.99e-04  logit_scale=4.599  throughput=176.0 img/s
+2026-04-13 16:42:31 [INFO] Epoch 2  Step 395/555  loss=0.2195  lr=1.98e-04  logit_scale=4.598  throughput=177.5 img/s
+2026-04-13 16:43:08 [INFO] Epoch 2  Step 445/555  loss=0.3072  lr=1.98e-04  logit_scale=4.597  throughput=177.1 img/s
+2026-04-13 16:43:45 [INFO] Epoch 2  Step 495/555  loss=0.2828  lr=1.98e-04  logit_scale=4.597  throughput=176.7 img/s
+2026-04-13 16:44:22 [INFO] Epoch 2  Step 545/555  loss=0.2237  lr=1.97e-04  logit_scale=4.597  throughput=176.5 img/s
+2026-04-13 16:44:28 [INFO] Epoch 2 complete  avg_loss=0.2509  logit_scale=4.597  time=401.3s  throughput=177.0 img/s
+2026-04-13 16:44:28 [INFO] Running validation...
+2026-04-13 16:44:31 [INFO] Val  Recall@1=67.00  Recall@5=92.80  Recall@10=97.30
+2026-04-13 16:44:31 [INFO] New best R@10=97.30 — saved to lora_checkpoints_v2/best
+2026-04-13 16:44:31 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_2
+2026-04-13 16:45:02 [INFO] Epoch 3  Step 40/555  loss=0.1756  lr=1.97e-04  logit_scale=4.596  throughput=167.2 img/s
+2026-04-13 16:45:39 [INFO] Epoch 3  Step 90/555  loss=0.2532  lr=1.96e-04  logit_scale=4.597  throughput=170.2 img/s
+2026-04-13 16:46:15 [INFO] Epoch 3  Step 140/555  loss=0.1759  lr=1.96e-04  logit_scale=4.597  throughput=172.3 img/s
+2026-04-13 16:46:53 [INFO] Epoch 3  Step 190/555  loss=0.1613  lr=1.95e-04  logit_scale=4.596  throughput=172.0 img/s
+2026-04-13 16:47:29 [INFO] Epoch 3  Step 240/555  loss=0.3052  lr=1.94e-04  logit_scale=4.596  throughput=173.1 img/s
+2026-04-13 16:48:07 [INFO] Epoch 3  Step 290/555  loss=0.2119  lr=1.94e-04  logit_scale=4.596  throughput=172.4 img/s
+2026-04-13 16:48:43 [INFO] Epoch 3  Step 340/555  loss=0.1996  lr=1.93e-04  logit_scale=4.596  throughput=172.6 img/s
+2026-04-13 16:49:22 [INFO] Epoch 3  Step 390/555  loss=0.2865  lr=1.92e-04  logit_scale=4.596  throughput=172.0 img/s
+2026-04-13 16:49:57 [INFO] Epoch 3  Step 440/555  loss=0.2671  lr=1.91e-04  logit_scale=4.596  throughput=172.7 img/s
+2026-04-13 16:50:36 [INFO] Epoch 3  Step 490/555  loss=0.2114  lr=1.90e-04  logit_scale=4.596  throughput=172.0 img/s
+2026-04-13 16:51:12 [INFO] Epoch 3  Step 540/555  loss=0.2671  lr=1.90e-04  logit_scale=4.597  throughput=172.5 img/s
+2026-04-13 16:51:21 [INFO] Epoch 3 complete  avg_loss=0.2348  logit_scale=4.597  time=409.7s  throughput=173.4 img/s
+2026-04-13 16:51:21 [INFO] Running validation...
+2026-04-13 16:51:25 [INFO] Val  Recall@1=69.20  Recall@5=93.90  Recall@10=97.30
+2026-04-13 16:51:25 [INFO] No R@10 improvement (1/5 patience)
+2026-04-13 16:51:25 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_3
+2026-04-13 16:51:50 [INFO] Epoch 4  Step 35/555  loss=0.2426  lr=1.89e-04  logit_scale=4.596  throughput=175.5 img/s
+2026-04-13 16:52:26 [INFO] Epoch 4  Step 85/555  loss=0.1849  lr=1.88e-04  logit_scale=4.596  throughput=178.9 img/s
+2026-04-13 16:52:59 [INFO] Epoch 4  Step 135/555  loss=0.1382  lr=1.87e-04  logit_scale=4.597  throughput=184.3 img/s
+2026-04-13 16:53:36 [INFO] Epoch 4  Step 185/555  loss=0.2756  lr=1.86e-04  logit_scale=4.596  throughput=180.7 img/s
+2026-04-13 16:54:12 [INFO] Epoch 4  Step 235/555  loss=0.3397  lr=1.85e-04  logit_scale=4.596  throughput=180.1 img/s
+2026-04-13 16:54:51 [INFO] Epoch 4  Step 285/555  loss=0.4161  lr=1.84e-04  logit_scale=4.595  throughput=177.1 img/s
+2026-04-13 16:55:27 [INFO] Epoch 4  Step 335/555  loss=0.2545  lr=1.82e-04  logit_scale=4.595  throughput=177.2 img/s
+2026-04-13 16:56:05 [INFO] Epoch 4  Step 385/555  loss=0.2044  lr=1.81e-04  logit_scale=4.594  throughput=175.7 img/s
+2026-04-13 16:56:43 [INFO] Epoch 4  Step 435/555  loss=0.1644  lr=1.80e-04  logit_scale=4.594  throughput=175.3 img/s
+2026-04-13 16:57:20 [INFO] Epoch 4  Step 485/555  loss=0.2217  lr=1.79e-04  logit_scale=4.594  throughput=174.6 img/s
+2026-04-13 16:57:59 [INFO] Epoch 4  Step 535/555  loss=0.2440  lr=1.78e-04  logit_scale=4.594  throughput=173.8 img/s
+2026-04-13 16:58:12 [INFO] Epoch 4 complete  avg_loss=0.2282  logit_scale=4.594  time=407.5s  throughput=174.3 img/s
+2026-04-13 16:58:12 [INFO] Running validation...
+2026-04-13 16:58:16 [INFO] Val  Recall@1=68.90  Recall@5=93.40  Recall@10=97.40
+2026-04-13 16:58:16 [INFO] New best R@10=97.40 — saved to lora_checkpoints_v2/best
+2026-04-13 16:58:16 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_4
+2026-04-13 16:58:42 [INFO] Epoch 5  Step 30/555  loss=0.2624  lr=1.76e-04  logit_scale=4.593  throughput=150.1 img/s
+2026-04-13 16:59:19 [INFO] Epoch 5  Step 80/555  loss=0.2688  lr=1.75e-04  logit_scale=4.594  throughput=163.6 img/s
+2026-04-13 17:00:00 [INFO] Epoch 5  Step 130/555  loss=0.1557  lr=1.74e-04  logit_scale=4.593  throughput=159.7 img/s
+2026-04-13 17:00:38 [INFO] Epoch 5  Step 180/555  loss=0.1845  lr=1.72e-04  logit_scale=4.593  throughput=162.7 img/s
+2026-04-13 17:01:16 [INFO] Epoch 5  Step 230/555  loss=0.3124  lr=1.71e-04  logit_scale=4.593  throughput=163.1 img/s
+2026-04-13 17:01:54 [INFO] Epoch 5  Step 280/555  loss=0.1862  lr=1.69e-04  logit_scale=4.593  throughput=164.6 img/s
+2026-04-13 17:02:33 [INFO] Epoch 5  Step 330/555  loss=0.2275  lr=1.68e-04  logit_scale=4.593  throughput=164.3 img/s
+2026-04-13 17:03:10 [INFO] Epoch 5  Step 380/555  loss=0.2482  lr=1.67e-04  logit_scale=4.593  throughput=165.6 img/s
+2026-04-13 17:03:48 [INFO] Epoch 5  Step 430/555  loss=0.1943  lr=1.65e-04  logit_scale=4.593  throughput=165.7 img/s
+2026-04-13 17:04:26 [INFO] Epoch 5  Step 480/555  loss=0.2795  lr=1.63e-04  logit_scale=4.593  throughput=166.1 img/s
+2026-04-13 17:05:02 [INFO] Epoch 5  Step 530/555  loss=0.2016  lr=1.62e-04  logit_scale=4.593  throughput=166.9 img/s
+2026-04-13 17:05:21 [INFO] Epoch 5 complete  avg_loss=0.2160  logit_scale=4.593  time=424.8s  throughput=167.2 img/s
+2026-04-13 17:05:21 [INFO] Running validation...
+2026-04-13 17:05:24 [INFO] Val  Recall@1=68.10  Recall@5=93.90  Recall@10=97.50
+2026-04-13 17:05:24 [INFO] New best R@10=97.50 — saved to lora_checkpoints_v2/best
+2026-04-13 17:05:24 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_5
+2026-04-13 17:05:45 [INFO] Epoch 6  Step 25/555  loss=0.1167  lr=1.60e-04  logit_scale=4.593  throughput=157.3 img/s
+2026-04-13 17:06:20 [INFO] Epoch 6  Step 75/555  loss=0.1851  lr=1.59e-04  logit_scale=4.593  throughput=173.9 img/s
+2026-04-13 17:06:59 [INFO] Epoch 6  Step 125/555  loss=0.2983  lr=1.57e-04  logit_scale=4.593  throughput=169.8 img/s
+2026-04-13 17:07:35 [INFO] Epoch 6  Step 175/555  loss=0.3130  lr=1.55e-04  logit_scale=4.593  throughput=170.9 img/s
+2026-04-13 17:08:13 [INFO] Epoch 6  Step 225/555  loss=0.2273  lr=1.54e-04  logit_scale=4.593  throughput=170.9 img/s
+2026-04-13 17:08:50 [INFO] Epoch 6  Step 275/555  loss=0.1701  lr=1.52e-04  logit_scale=4.593  throughput=171.5 img/s
+2026-04-13 17:09:29 [INFO] Epoch 6  Step 325/555  loss=0.2247  lr=1.50e-04  logit_scale=4.593  throughput=170.4 img/s
+2026-04-13 17:10:06 [INFO] Epoch 6  Step 375/555  loss=0.3247  lr=1.49e-04  logit_scale=4.593  throughput=170.7 img/s
+2026-04-13 17:10:44 [INFO] Epoch 6  Step 425/555  loss=0.1457  lr=1.47e-04  logit_scale=4.593  throughput=170.2 img/s
+2026-04-13 17:11:21 [INFO] Epoch 6  Step 475/555  loss=0.2110  lr=1.45e-04  logit_scale=4.593  throughput=170.7 img/s
+2026-04-13 17:11:59 [INFO] Epoch 6  Step 525/555  loss=0.2435  lr=1.43e-04  logit_scale=4.593  throughput=170.5 img/s
+2026-04-13 17:12:18 [INFO] Epoch 6 complete  avg_loss=0.2066  logit_scale=4.593  time=413.4s  throughput=171.8 img/s
+2026-04-13 17:12:18 [INFO] Running validation...
+2026-04-13 17:12:21 [INFO] Val  Recall@1=69.80  Recall@5=94.20  Recall@10=97.60
+2026-04-13 17:12:21 [INFO] New best R@10=97.60 — saved to lora_checkpoints_v2/best
+2026-04-13 17:12:21 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_6
+2026-04-13 17:12:37 [INFO] Epoch 7  Step 20/555  loss=0.3111  lr=1.41e-04  logit_scale=4.593  throughput=167.3 img/s
+2026-04-13 17:13:11 [INFO] Epoch 7  Step 70/555  loss=0.1654  lr=1.40e-04  logit_scale=4.593  throughput=179.8 img/s
+2026-04-13 17:13:46 [INFO] Epoch 7  Step 120/555  loss=0.3353  lr=1.38e-04  logit_scale=4.593  throughput=182.3 img/s
+2026-04-13 17:14:22 [INFO] Epoch 7  Step 170/555  loss=0.2266  lr=1.36e-04  logit_scale=4.593  throughput=180.8 img/s
+2026-04-13 17:14:58 [INFO] Epoch 7  Step 220/555  loss=0.0988  lr=1.34e-04  logit_scale=4.593  throughput=179.3 img/s
+2026-04-13 17:15:35 [INFO] Epoch 7  Step 270/555  loss=0.2424  lr=1.32e-04  logit_scale=4.593  throughput=178.8 img/s
+2026-04-13 17:16:12 [INFO] Epoch 7  Step 320/555  loss=0.2173  lr=1.30e-04  logit_scale=4.593  throughput=177.8 img/s
+2026-04-13 17:16:47 [INFO] Epoch 7  Step 370/555  loss=0.2143  lr=1.28e-04  logit_scale=4.593  throughput=178.1 img/s
+2026-04-13 17:17:24 [INFO] Epoch 7  Step 420/555  loss=0.1105  lr=1.26e-04  logit_scale=4.593  throughput=177.8 img/s
+2026-04-13 17:17:58 [INFO] Epoch 7  Step 470/555  loss=0.3867  lr=1.24e-04  logit_scale=4.593  throughput=178.7 img/s
+2026-04-13 17:18:36 [INFO] Epoch 7  Step 520/555  loss=0.2439  lr=1.22e-04  logit_scale=4.593  throughput=177.9 img/s
+2026-04-13 17:19:00 [INFO] Epoch 7 complete  avg_loss=0.2008  logit_scale=4.593  time=398.2s  throughput=178.4 img/s
+2026-04-13 17:19:00 [INFO] Running validation...
+2026-04-13 17:19:03 [INFO] Val  Recall@1=69.80  Recall@5=94.10  Recall@10=97.90
+2026-04-13 17:19:03 [INFO] New best R@10=97.90 — saved to lora_checkpoints_v2/best
+2026-04-13 17:19:03 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_7
+2026-04-13 17:19:16 [INFO] Epoch 8  Step 15/555  loss=0.1489  lr=1.20e-04  logit_scale=4.593  throughput=151.8 img/s
+2026-04-13 17:19:52 [INFO] Epoch 8  Step 65/555  loss=0.1503  lr=1.19e-04  logit_scale=4.593  throughput=170.7 img/s
+2026-04-13 17:20:27 [INFO] Epoch 8  Step 115/555  loss=0.2128  lr=1.17e-04  logit_scale=4.593  throughput=176.8 img/s
+2026-04-13 17:21:06 [INFO] Epoch 8  Step 165/555  loss=0.1365  lr=1.15e-04  logit_scale=4.593  throughput=171.9 img/s
+2026-04-13 17:21:44 [INFO] Epoch 8  Step 215/555  loss=0.1195  lr=1.13e-04  logit_scale=4.593  throughput=171.7 img/s
+2026-04-13 17:22:23 [INFO] Epoch 8  Step 265/555  loss=0.2316  lr=1.11e-04  logit_scale=4.593  throughput=169.6 img/s
+2026-04-13 17:23:01 [INFO] Epoch 8  Step 315/555  loss=0.1769  lr=1.09e-04  logit_scale=4.594  throughput=169.3 img/s
+2026-04-13 17:23:41 [INFO] Epoch 8  Step 365/555  loss=0.2296  lr=1.07e-04  logit_scale=4.593  throughput=168.1 img/s
+2026-04-13 17:24:17 [INFO] Epoch 8  Step 415/555  loss=0.1216  lr=1.05e-04  logit_scale=4.593  throughput=169.4 img/s
+2026-04-13 17:24:55 [INFO] Epoch 8  Step 465/555  loss=0.1282  lr=1.03e-04  logit_scale=4.594  throughput=169.3 img/s
+2026-04-13 17:25:31 [INFO] Epoch 8  Step 515/555  loss=0.2337  lr=1.01e-04  logit_scale=4.594  throughput=170.1 img/s
+2026-04-13 17:25:59 [INFO] Epoch 8 complete  avg_loss=0.1926  logit_scale=4.593  time=415.4s  throughput=171.0 img/s
+2026-04-13 17:25:59 [INFO] Running validation...
+2026-04-13 17:26:02 [INFO] Val  Recall@1=70.30  Recall@5=94.50  Recall@10=97.60
+2026-04-13 17:26:02 [INFO] No R@10 improvement (1/5 patience)
+2026-04-13 17:26:02 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_8
+2026-04-13 17:26:11 [INFO] Epoch 9  Step 10/555  loss=0.1652  lr=9.85e-05  logit_scale=4.593  throughput=145.1 img/s
+2026-04-13 17:26:49 [INFO] Epoch 9  Step 60/555  loss=0.1796  lr=9.65e-05  logit_scale=4.594  throughput=163.7 img/s
+2026-04-13 17:27:27 [INFO] Epoch 9  Step 110/555  loss=0.1381  lr=9.45e-05  logit_scale=4.593  throughput=166.8 img/s
+2026-04-13 17:28:06 [INFO] Epoch 9  Step 160/555  loss=0.1907  lr=9.25e-05  logit_scale=4.594  throughput=166.0 img/s
+2026-04-13 17:28:43 [INFO] Epoch 9  Step 210/555  loss=0.1952  lr=9.05e-05  logit_scale=4.594  throughput=167.6 img/s
+2026-04-13 17:29:21 [INFO] Epoch 9  Step 260/555  loss=0.1994  lr=8.85e-05  logit_scale=4.594  throughput=167.2 img/s
+2026-04-13 17:29:58 [INFO] Epoch 9  Step 310/555  loss=0.2012  lr=8.65e-05  logit_scale=4.594  throughput=168.1 img/s
+2026-04-13 17:30:37 [INFO] Epoch 9  Step 360/555  loss=0.1255  lr=8.45e-05  logit_scale=4.594  throughput=167.5 img/s
+2026-04-13 17:31:14 [INFO] Epoch 9  Step 410/555  loss=0.2686  lr=8.26e-05  logit_scale=4.594  throughput=168.2 img/s
+2026-04-13 17:31:53 [INFO] Epoch 9  Step 460/555  loss=0.1449  lr=8.06e-05  logit_scale=4.594  throughput=167.8 img/s
+2026-04-13 17:32:30 [INFO] Epoch 9  Step 510/555  loss=0.2319  lr=7.86e-05  logit_scale=4.594  throughput=168.1 img/s
+2026-04-13 17:33:04 [INFO] Epoch 9 complete  avg_loss=0.1865  logit_scale=4.594  time=421.5s  throughput=168.5 img/s
+2026-04-13 17:33:04 [INFO] Running validation...
+2026-04-13 17:33:07 [INFO] Val  Recall@1=70.40  Recall@5=94.50  Recall@10=97.80
+2026-04-13 17:33:07 [INFO] No R@10 improvement (2/5 patience)
+2026-04-13 17:33:07 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_9
+2026-04-13 17:33:13 [INFO] Epoch 10  Step 5/555  loss=0.1917  lr=7.67e-05  logit_scale=4.594  throughput=105.6 img/s
+2026-04-13 17:33:46 [INFO] Epoch 10  Step 55/555  loss=0.1888  lr=7.47e-05  logit_scale=4.594  throughput=180.2 img/s
+2026-04-13 17:34:23 [INFO] Epoch 10  Step 105/555  loss=0.1424  lr=7.28e-05  logit_scale=4.594  throughput=176.8 img/s
+2026-04-13 17:35:00 [INFO] Epoch 10  Step 155/555  loss=0.1526  lr=7.09e-05  logit_scale=4.594  throughput=175.2 img/s
+2026-04-13 17:35:38 [INFO] Epoch 10  Step 205/555  loss=0.2309  lr=6.89e-05  logit_scale=4.594  throughput=174.6 img/s
+2026-04-13 17:36:16 [INFO] Epoch 10  Step 255/555  loss=0.1233  lr=6.70e-05  logit_scale=4.594  throughput=172.8 img/s
+2026-04-13 17:36:52 [INFO] Epoch 10  Step 305/555  loss=0.1259  lr=6.52e-05  logit_scale=4.594  throughput=173.5 img/s
+2026-04-13 17:37:30 [INFO] Epoch 10  Step 355/555  loss=0.2126  lr=6.33e-05  logit_scale=4.594  throughput=172.9 img/s
+2026-04-13 17:38:07 [INFO] Epoch 10  Step 405/555  loss=0.3477  lr=6.14e-05  logit_scale=4.594  throughput=173.0 img/s
+2026-04-13 17:38:46 [INFO] Epoch 10  Step 455/555  loss=0.2090  lr=5.96e-05  logit_scale=4.594  throughput=172.0 img/s
+2026-04-13 17:39:22 [INFO] Epoch 10  Step 505/555  loss=0.2280  lr=5.77e-05  logit_scale=4.594  throughput=172.7 img/s
+2026-04-13 17:39:57 [INFO] Epoch 10  Step 555/555  loss=0.1965  lr=5.59e-05  logit_scale=4.594  throughput=173.4 img/s
+2026-04-13 17:39:57 [INFO] Epoch 10 complete  avg_loss=0.1822  logit_scale=4.594  time=409.8s  throughput=173.4 img/s
+2026-04-13 17:39:57 [INFO] Running validation...
+2026-04-13 17:40:00 [INFO] Val  Recall@1=71.30  Recall@5=93.90  Recall@10=98.10
+2026-04-13 17:40:00 [INFO] New best R@10=98.10 — saved to lora_checkpoints_v2/best
+2026-04-13 17:40:01 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_10
+2026-04-13 17:40:40 [INFO] Epoch 11  Step 50/555  loss=0.2457  lr=5.41e-05  logit_scale=4.595  throughput=160.8 img/s
+2026-04-13 17:41:19 [INFO] Epoch 11  Step 100/555  loss=0.1273  lr=5.24e-05  logit_scale=4.594  throughput=163.6 img/s
+2026-04-13 17:41:58 [INFO] Epoch 11  Step 150/555  loss=0.1743  lr=5.06e-05  logit_scale=4.594  throughput=163.4 img/s
+2026-04-13 17:42:35 [INFO] Epoch 11  Step 200/555  loss=0.2343  lr=4.89e-05  logit_scale=4.594  throughput=165.7 img/s
+2026-04-13 17:43:13 [INFO] Epoch 11  Step 250/555  loss=0.1371  lr=4.72e-05  logit_scale=4.594  throughput=166.7 img/s
+2026-04-13 17:43:50 [INFO] Epoch 11  Step 300/555  loss=0.1287  lr=4.55e-05  logit_scale=4.594  throughput=167.4 img/s
+2026-04-13 17:44:27 [INFO] Epoch 11  Step 350/555  loss=0.1046  lr=4.38e-05  logit_scale=4.594  throughput=167.8 img/s
+2026-04-13 17:45:06 [INFO] Epoch 11  Step 400/555  loss=0.1802  lr=4.22e-05  logit_scale=4.594  throughput=167.4 img/s
+2026-04-13 17:45:44 [INFO] Epoch 11  Step 450/555  loss=0.1980  lr=4.05e-05  logit_scale=4.595  throughput=167.9 img/s
+2026-04-13 17:46:24 [INFO] Epoch 11  Step 500/555  loss=0.1705  lr=3.89e-05  logit_scale=4.595  throughput=166.8 img/s
+2026-04-13 17:47:01 [INFO] Epoch 11  Step 550/555  loss=0.1157  lr=3.73e-05  logit_scale=4.595  throughput=167.6 img/s
+2026-04-13 17:47:04 [INFO] Epoch 11 complete  avg_loss=0.1755  logit_scale=4.595  time=423.0s  throughput=167.9 img/s
+2026-04-13 17:47:04 [INFO] Running validation...
+2026-04-13 17:47:07 [INFO] Val  Recall@1=71.50  Recall@5=94.50  Recall@10=97.90
+2026-04-13 17:47:07 [INFO] No R@10 improvement (1/5 patience)
+2026-04-13 17:47:07 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_11
+2026-04-13 17:47:41 [INFO] Epoch 12  Step 45/555  loss=0.1970  lr=3.58e-05  logit_scale=4.595  throughput=169.7 img/s
+2026-04-13 17:48:17 [INFO] Epoch 12  Step 95/555  loss=0.1856  lr=3.43e-05  logit_scale=4.595  throughput=173.8 img/s
+2026-04-13 17:48:54 [INFO] Epoch 12  Step 145/555  loss=0.2490  lr=3.28e-05  logit_scale=4.595  throughput=173.8 img/s
+2026-04-13 17:49:32 [INFO] Epoch 12  Step 195/555  loss=0.1622  lr=3.13e-05  logit_scale=4.595  throughput=172.4 img/s
+2026-04-13 17:50:09 [INFO] Epoch 12  Step 245/555  loss=0.1734  lr=2.99e-05  logit_scale=4.595  throughput=172.0 img/s
+2026-04-13 17:50:48 [INFO] Epoch 12  Step 295/555  loss=0.1361  lr=2.84e-05  logit_scale=4.595  throughput=170.7 img/s
+2026-04-13 17:51:25 [INFO] Epoch 12  Step 345/555  loss=0.1195  lr=2.70e-05  logit_scale=4.595  throughput=171.0 img/s
+2026-04-13 17:52:03 [INFO] Epoch 12  Step 395/555  loss=0.1441  lr=2.57e-05  logit_scale=4.595  throughput=170.9 img/s
+2026-04-13 17:52:37 [INFO] Epoch 12  Step 445/555  loss=0.1278  lr=2.44e-05  logit_scale=4.595  throughput=172.5 img/s
+2026-04-13 17:53:16 [INFO] Epoch 12  Step 495/555  loss=0.1736  lr=2.31e-05  logit_scale=4.595  throughput=171.7 img/s
+2026-04-13 17:53:52 [INFO] Epoch 12  Step 545/555  loss=0.1211  lr=2.18e-05  logit_scale=4.595  throughput=172.1 img/s
+2026-04-13 17:53:59 [INFO] Epoch 12 complete  avg_loss=0.1698  logit_scale=4.595  time=412.1s  throughput=172.4 img/s
+2026-04-13 17:53:59 [INFO] Running validation...
+2026-04-13 17:54:03 [INFO] Val  Recall@1=72.00  Recall@5=94.50  Recall@10=97.90
+2026-04-13 17:54:03 [INFO] No R@10 improvement (2/5 patience)
+2026-04-13 17:54:03 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_12
+2026-04-13 17:54:34 [INFO] Epoch 13  Step 40/555  loss=0.1090  lr=2.06e-05  logit_scale=4.595  throughput=166.9 img/s
+2026-04-13 17:55:12 [INFO] Epoch 13  Step 90/555  loss=0.2372  lr=1.94e-05  logit_scale=4.595  throughput=165.8 img/s
+2026-04-13 17:55:50 [INFO] Epoch 13  Step 140/555  loss=0.1372  lr=1.82e-05  logit_scale=4.595  throughput=167.3 img/s
+2026-04-13 17:56:30 [INFO] Epoch 13  Step 190/555  loss=0.2766  lr=1.71e-05  logit_scale=4.595  throughput=165.8 img/s
+2026-04-13 17:57:08 [INFO] Epoch 13  Step 240/555  loss=0.1456  lr=1.59e-05  logit_scale=4.595  throughput=166.1 img/s
+2026-04-13 17:57:46 [INFO] Epoch 13  Step 290/555  loss=0.2164  lr=1.49e-05  logit_scale=4.595  throughput=166.3 img/s
+2026-04-13 17:58:24 [INFO] Epoch 13  Step 340/555  loss=0.1205  lr=1.38e-05  logit_scale=4.595  throughput=166.8 img/s
+2026-04-13 17:59:04 [INFO] Epoch 13  Step 390/555  loss=0.2153  lr=1.28e-05  logit_scale=4.595  throughput=165.5 img/s
+2026-04-13 17:59:42 [INFO] Epoch 13  Step 440/555  loss=0.2017  lr=1.19e-05  logit_scale=4.595  throughput=166.2 img/s
+2026-04-13 18:00:21 [INFO] Epoch 13  Step 490/555  loss=0.1848  lr=1.09e-05  logit_scale=4.595  throughput=166.1 img/s
+2026-04-13 18:00:58 [INFO] Epoch 13  Step 540/555  loss=0.1308  lr=1.00e-05  logit_scale=4.595  throughput=166.5 img/s
+2026-04-13 18:01:08 [INFO] Epoch 13 complete  avg_loss=0.1701  logit_scale=4.595  time=425.0s  throughput=167.2 img/s
+2026-04-13 18:01:08 [INFO] Running validation...
+2026-04-13 18:01:11 [INFO] Val  Recall@1=70.80  Recall@5=94.70  Recall@10=97.90
+2026-04-13 18:01:11 [INFO] No R@10 improvement (3/5 patience)
+2026-04-13 18:01:11 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_13
+2026-04-13 18:01:37 [INFO] Epoch 14  Step 35/555  loss=0.0907  lr=9.19e-06  logit_scale=4.595  throughput=173.2 img/s
+2026-04-13 18:02:14 [INFO] Epoch 14  Step 85/555  loss=0.0837  lr=8.36e-06  logit_scale=4.595  throughput=173.4 img/s
+2026-04-13 18:02:51 [INFO] Epoch 14  Step 135/555  loss=0.1357  lr=7.58e-06  logit_scale=4.595  throughput=174.3 img/s
+2026-04-13 18:03:43 [INFO] Epoch 14  Step 185/555  loss=0.1919  lr=6.83e-06  logit_scale=4.595  throughput=155.9 img/s
+2026-04-13 18:04:22 [INFO] Epoch 14  Step 235/555  loss=0.1729  lr=6.12e-06  logit_scale=4.595  throughput=158.1 img/s
+2026-04-13 18:05:02 [INFO] Epoch 14  Step 285/555  loss=0.2123  lr=5.45e-06  logit_scale=4.595  throughput=158.0 img/s
+2026-04-13 18:05:44 [INFO] Epoch 14  Step 335/555  loss=0.1270  lr=4.81e-06  logit_scale=4.595  throughput=157.2 img/s
+2026-04-13 18:06:24 [INFO] Epoch 14  Step 385/555  loss=0.1263  lr=4.22e-06  logit_scale=4.595  throughput=157.7 img/s
+2026-04-13 18:07:04 [INFO] Epoch 14  Step 435/555  loss=0.1394  lr=3.66e-06  logit_scale=4.595  throughput=157.9 img/s
+2026-04-13 18:07:42 [INFO] Epoch 14  Step 485/555  loss=0.0727  lr=3.14e-06  logit_scale=4.595  throughput=158.9 img/s
+2026-04-13 18:08:20 [INFO] Epoch 14  Step 535/555  loss=0.3768  lr=2.66e-06  logit_scale=4.595  throughput=159.6 img/s
+2026-04-13 18:08:33 [INFO] Epoch 14 complete  avg_loss=0.1641  logit_scale=4.595  time=441.2s  throughput=161.0 img/s
+2026-04-13 18:08:33 [INFO] Running validation...
+2026-04-13 18:08:36 [INFO] Val  Recall@1=70.90  Recall@5=94.70  Recall@10=98.20
+2026-04-13 18:08:36 [INFO] New best R@10=98.20 — saved to lora_checkpoints_v2/best
+2026-04-13 18:08:36 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_14
+2026-04-13 18:09:01 [INFO] Epoch 15  Step 30/555  loss=0.1669  lr=2.22e-06  logit_scale=4.595  throughput=156.5 img/s
+2026-04-13 18:09:37 [INFO] Epoch 15  Step 80/555  loss=0.1485  lr=1.82e-06  logit_scale=4.595  throughput=168.0 img/s
+2026-04-13 18:10:15 [INFO] Epoch 15  Step 130/555  loss=0.1488  lr=1.46e-06  logit_scale=4.595  throughput=168.7 img/s
+2026-04-13 18:10:54 [INFO] Epoch 15  Step 180/555  loss=0.1344  lr=1.14e-06  logit_scale=4.595  throughput=167.6 img/s
+2026-04-13 18:11:31 [INFO] Epoch 15  Step 230/555  loss=0.2054  lr=8.55e-07  logit_scale=4.595  throughput=168.2 img/s
+2026-04-13 18:12:10 [INFO] Epoch 15  Step 280/555  loss=0.1199  lr=6.13e-07  logit_scale=4.595  throughput=167.6 img/s
+2026-04-13 18:12:49 [INFO] Epoch 15  Step 330/555  loss=0.1709  lr=4.11e-07  logit_scale=4.595  throughput=167.3 img/s
+2026-04-13 18:13:27 [INFO] Epoch 15  Step 380/555  loss=0.1493  lr=2.50e-07  logit_scale=4.595  throughput=167.5 img/s
+2026-04-13 18:14:03 [INFO] Epoch 15  Step 430/555  loss=0.1866  lr=1.28e-07  logit_scale=4.595  throughput=168.3 img/s
+2026-04-13 18:14:42 [INFO] Epoch 15  Step 480/555  loss=0.1333  lr=4.65e-08  logit_scale=4.595  throughput=168.2 img/s
+2026-04-13 18:15:18 [INFO] Epoch 15  Step 530/555  loss=0.1976  lr=5.45e-09  logit_scale=4.595  throughput=168.9 img/s
+2026-04-13 18:15:35 [INFO] Epoch 15 complete  avg_loss=0.1650  logit_scale=4.595  time=418.4s  throughput=169.8 img/s
+2026-04-13 18:15:35 [INFO] Running validation...
+2026-04-13 18:15:39 [INFO] Val  Recall@1=70.90  Recall@5=94.80  Recall@10=98.20
+2026-04-13 18:15:39 [INFO] No R@10 improvement (1/5 patience)
+2026-04-13 18:15:39 [INFO] Saved checkpoint: lora_checkpoints_v2/epoch_15
+2026-04-13 18:15:39 [INFO] Training complete. Best val Recall@10: 98.20
+2026-04-13 18:15:39 [INFO] Best checkpoint: lora_checkpoints_v2/best
