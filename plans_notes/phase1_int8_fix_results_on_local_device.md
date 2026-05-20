@@ -1,4 +1,4 @@
-# Phase 1: INT8 Quantization Fix — Results & Learnings
+# Phase 1: INT8 Quantization Fix On local device — Results & Learnings
 
 ## Summary
 

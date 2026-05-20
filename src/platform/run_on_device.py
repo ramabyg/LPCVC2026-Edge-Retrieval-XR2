@@ -157,11 +157,33 @@ QUANTIZE_DTYPES = {
 
 
 def quantize_and_compile(model, input_specs, precision, calibration_data):
-    """2-step pipeline: submit_quantize_job → submit_compile_job."""
+    """3-job pipeline per QAI Hub docs: optimize ONNX → quantize → compile to QNN DLC.
+
+    The first compile-to-ONNX pass runs the Hub optimizer (fuses LayerNorm /
+    Attention / GELU) before quantization, which materially improves quantized
+    accuracy versus feeding the raw exported ONNX into submit_quantize_job.
+    """
+    # Step 1: pre-quantize optimization compile (ONNX → optimized ONNX)
+    optimize_job = qai_hub.submit_compile_job(
+        model=model,
+        device=TARGET_DEVICE,
+        input_specs=input_specs,
+        options="--target_runtime onnx",
+    )
+    print(f"  Optimize (ONNX) job submitted: {optimize_job.job_id}  (waiting...)")
+    optimize_job.wait()
+    status = optimize_job.get_status()
+    if status.failure:
+        print(f"  Optimize FAILED: {status.message}")
+        sys.exit(1)
+    print(f"  Optimize done: {optimize_job.job_id}")
+    optimized_model = optimize_job.get_target_model()
+
+    # Step 2: quantize the optimized ONNX
     weights_dtype, activations_dtype = QUANTIZE_DTYPES[precision]
     print(f"  Quantize: weights={weights_dtype.name}  activations={activations_dtype.name}")
     quant_job = qai_hub.submit_quantize_job(
-        model=model,
+        model=optimized_model,
         calibration_data=calibration_data,
         weights_dtype=weights_dtype,
         activations_dtype=activations_dtype,
@@ -175,6 +197,8 @@ def quantize_and_compile(model, input_specs, precision, calibration_data):
     print(f"  Quantize done: {quant_job.job_id}")
     quantized_model = quant_job.get_target_model()
 
+    # Step 3: final compile to QNN DLC. --quantize_io intentionally OFF to
+    # preserve float32 IO (competition sends fp32 images; we read fp32 embeddings).
     compile_job = qai_hub.submit_compile_job(
         model=quantized_model,
         device=TARGET_DEVICE,
