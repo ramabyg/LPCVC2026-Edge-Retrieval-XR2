@@ -24,6 +24,16 @@
             "args": ["--epochs", "3", "--batch-size", "64"],
             "stopOnEntry": true,
             "env": { "PYTHONPATH": "${workspaceFolder}" }
+        },
+        {
+            "name": "debug quant issue",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/debug/stage_runner.py",
+            "console": "integratedTerminal",
+            "args": ["--precision", "int8-hub"],
+            "stopOnEntry": true,
+            "env": { "PYTHONPATH": "${workspaceFolder}" }
         }
     ]
 }
