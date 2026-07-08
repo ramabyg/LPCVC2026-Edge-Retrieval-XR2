@@ -434,7 +434,6 @@ Post-training quantization (PTQ) is not viable for CLIP on XR2 Gen 2:
 - **Recommended path forward:** Quantization-Aware Training (QAT) or stay FP32 and improve via fine-tuning
 
 
-
 # Quantization with QCOM compiler instead of local quantization.
 - Use python -m src.platform.compile_and_profile --precision int8-compile  
 - It gave performance gain, latency almost reduced to half

@@ -1,0 +1,235 @@
+PS C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2>  c:; cd 'c:\rama\projects\LPCVC2026-Edge-Retrieval-XR2'; & 'c:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\.venv\Scripts\python.exe' 'c:\Users\ursra\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\launcher' '51280' '--' 'C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2/src/debug/stage_runner.py' '--precision' 'int8-hub' 
+Stage runner — precision=int8-hub
+  Stage artifacts dir: C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub
+
+Loading calibration data...
+  Calibration: source=coco  images=500  texts=500
+  Calibration: source=coco  images=500  texts=500
+
+=== Stage 1: Hub optimize compile jobs (--target_runtime onnx) ===
+  [image] submitting optimize compile job (--target_runtime onnx)...
+Uploading tmpj9fmb05w.zip
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 272M/272M [01:25<00:00, 3.32MB/s]
+Scheduled compile job (j57v0xwn5) successfully. To see the status and results:
+    https://workbench.aihub.qualcomm.com/jobs/j57v0xwn5/
+
+  [image] optimize job: j57v0xwn5
+  [text] submitting optimize compile job (--target_runtime onnx)...
+Uploading tmpw9yjakqy.zip
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 210M/210M [01:08<00:00, 3.22MB/s]
+Scheduled compile job (jp0e3r005) successfully. To see the status and results:
+    https://workbench.aihub.qualcomm.com/jobs/jp0e3r005/
+
+  [text] optimize job: jp0e3r005
+Waiting for compile job (jp0e3r005) completion. Type Ctrl+C to stop waiting at any time.
+    ✅ SUCCESS                          
+  Stage 1 jobs complete.
+
+=== Stage 2: Hub quantize jobs ===
+  [image] submitting quantize job  weights=INT8 acts=INT8  options=''...
+Uploading dataset:  14%|█████████████████████████████▌                                                                                                                                                                                       | 12.6M/90.6M [00:05<01:17, 1.05MB/s]
+
+Uploading dataset: 90.6MB [00:30, 3.11MB/s]                                                                                                                                                                                                                                       
+Scheduled quantize job (jpvz0wqzg) successfully. To see the status and results:█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▋| 90.5M/90.6M [00:30<00:00, 3.43MB/s]
+    https://workbench.aihub.qualcomm.com/jobs/jpvz0wqzg/
+
+  [image] quantize job: jpvz0wqzg
+  [text] submitting quantize job  weights=INT8 acts=INT8  options=''...
+Uploading dataset: 1.46MB [00:00, 1.73MB/s]                                                                                                                                                                                                                                       
+Scheduled quantize job (jg99j40mg) successfully. To see the status and results:
+    https://workbench.aihub.qualcomm.com/jobs/jg99j40mg/
+
+  [text] quantize job: jg99j40mg
+Waiting for quantize job (jpvz0wqzg) completion. Type Ctrl+C to stop waiting at any time.
+    ✅ SUCCESS                          
+  Stage 2 jobs complete.
+
+=== Downloading Stage 1 + Stage 2 artifacts ===
+  [image] downloading optimized ONNX to C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub\stage1 ...
+job_j57v0xwn5_optimized_onnx_mnle6kewq.onnx.zip: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 272M/272M [00:17<00:00, 16.4MB/s]
+Downloaded model to C:\Users\ursra\AppData\Local\Temp\tmpnk1lvncj\job_j57v0xwn5_optimized_onnx_mnle6kewq.onnx.zip
+  [image] downloading quantized ONNX to C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub\stage2 ...
+job_jpvz0wqzg_qdq_onnx_mqee79g5q.onnx.zip: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 277M/277M [00:24<00:00, 12.1MB/s]
+Downloaded model to C:\Users\ursra\AppData\Local\Temp\tmpcfdvg1p3\job_jpvz0wqzg_qdq_onnx_mqee79g5q.onnx.zip
+  [text] downloading optimized ONNX to C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub\stage1 ...
+job_jp0e3r005_optimized_onnx_mn1dwyr4n.onnx.zip: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 210M/210M [00:12<00:00, 17.3MB/s]
+Downloaded model to C:\Users\ursra\AppData\Local\Temp\tmpc6w_mt70\job_jp0e3r005_optimized_onnx_mn1dwyr4n.onnx.zip
+  [text] downloading quantized ONNX to C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub\stage2 ...
+job_jg99j40mg_qdq_onnx_mq99ld2yq.onnx.zip: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 212M/212M [00:13<00:00, 16.5MB/s]
+Downloaded model to C:\Users\ursra\AppData\Local\Temp\tmp53zhkbsy\job_jg99j40mg_qdq_onnx_mq99ld2yq.onnx.zip
+
+=== Loading sample dataset ===
+  56 images, 211 text prompts.
+
+=== Local evaluation (onnxruntime CPU) ===
+
+[Stage 0  raw fp32]  image: exported_onnx\image_encoder.onnx
+[Stage 0  raw fp32]   text: exported_onnx\text_encoder.onnx
+  [Stage 0  raw fp32] image embed[0] dtype=float32  shape=(1, 512)  min=-2.489  max=6.352  norm=9.863
+  [Stage 0  raw fp32] text  embed[0] dtype=float32  shape=(1, 512)  min=-0.922  max=5.217  norm=8.175
+[Stage 0  raw fp32] Recall@10 = 0.8698
+
+[Stage 1  hub-optimized]  image: diagnostics\stage_artifacts\int8-hub\stage1\image.onnx
+[Stage 1  hub-optimized]   text: diagnostics\stage_artifacts\int8-hub\stage1\text.onnx
+
+
+Exceptions:
+Exception has occurred: Fail
+[ONNXRuntimeError] : 1 : FAIL : Deserialize tensor val_974 failed.tensorprotoutils.cc:1094 onnxruntime::utils::GetExtDataFromTensorProto External initializer: val_974 offset: 318818304 size to read: 7077888 given file_length: 253996976 are out of bounds or can not be read in full.
+  File "C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\src\debug\stage_runner.py", line 190, in evaluate_pair
+    providers=["CPUExecutionProvider"])
+    
+  File "C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\src\debug\stage_runner.py", line 332, in main
+    recall = evaluate_pair(label, img_path, txt_path, images, text_tokens, inspect_first)
+  File "C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\src\debug\stage_runner.py", line 355, in <module>
+    main()
+    ~~~~^^
+onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Deserialize tensor val_974 failed.tensorprotoutils.cc:1094 onnxruntime::utils::GetExtDataFromTensorProto External initializer: val_974 offset: 318818304 size to read: 7077888 given file_length: 253996976 are out of bounds or can not be read in full.
+
+
+
+
+
+
+.venv) PS C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2>  & 'c:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\.venv\Scripts\python.exe' 'c:\Users\ursra\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\launcher' '60820' '--' 'C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2/src/debug/stage_runner.py' '--precision' 'int8-hub' 
+Stage runner — precision=int8-hub
+  Stage artifacts dir: C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub
+
+Loading calibration data...
+  Calibration: source=coco  images=500  texts=500
+  Calibration: source=coco  images=500  texts=500
+
+=== Stage 1: Hub optimize compile jobs (--target_runtime onnx) ===
+  [image] submitting optimize compile job (--target_runtime onnx)...
+Uploading image_encoder.onnx
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1.68M/1.68M [00:00<00:00, 1.76MB/s]
+Scheduled compile job (j5q9e3dnp) successfully. To see the status and results:
+    https://workbench.aihub.qualcomm.com/jobs/j5q9e3dnp/
+
+  [image] optimize job: j5q9e3dnp
+  [text] submitting optimize compile job (--target_runtime onnx)...
+Uploading text_encoder.onnx
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1.50M/1.50M [00:00<00:00, 1.72MB/s]
+Scheduled compile job (j56qen06g) successfully. To see the status and results:
+    https://workbench.aihub.qualcomm.com/jobs/j56qen06g/
+
+  [text] optimize job: j56qen06g
+Waiting for compile job (j5q9e3dnp) completion. Type Ctrl+C to stop waiting at any time.
+    ❌ FAILED               The uploaded ONNX model is missing its external weights.
+Please use Qualcomm AI Hub Workbench's ONNX model directory format to upload this model.            
+  FAILED (stage1-image): The uploaded ONNX model is missing its external weights.
+Please use Qualcomm AI Hub Workbench's ONNX model directory format to upload this model.
+(.venv) PS C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2>  c:; cd 'c:\rama\projects\LPCVC2026-Edge-Retrieval-XR2'; & 'c:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\.venv\Scripts\python.exe' 'c:\Users\ursra\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\launcher' '51280' '--' 'C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2/src/debug/stage_runner.py' '--precision' 'int8-hub' 
+Stage runner — precision=int8-hub
+  Stage artifacts dir: C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub
+
+Loading calibration data...
+  Calibration: source=coco  images=500  texts=500
+  Calibration: source=coco  images=500  texts=500
+
+=== Stage 1: Hub optimize compile jobs (--target_runtime onnx) ===
+  [image] submitting optimize compile job (--target_runtime onnx)...
+Uploading tmpj9fmb05w.zip
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 272M/272M [01:25<00:00, 3.32MB/s]
+Scheduled compile job (j57v0xwn5) successfully. To see the status and results:
+    https://workbench.aihub.qualcomm.com/jobs/j57v0xwn5/
+
+  [image] optimize job: j57v0xwn5
+  [text] submitting optimize compile job (--target_runtime onnx)...
+Uploading tmpw9yjakqy.zip
+100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 210M/210M [01:08<00:00, 3.22MB/s]
+Scheduled compile job (jp0e3r005) successfully. To see the status and results:
+    https://workbench.aihub.qualcomm.com/jobs/jp0e3r005/
+
+  [text] optimize job: jp0e3r005
+Waiting for compile job (jp0e3r005) completion. Type Ctrl+C to stop waiting at any time.
+    ✅ SUCCESS                          
+  Stage 1 jobs complete.
+
+=== Stage 2: Hub quantize jobs ===
+  [image] submitting quantize job  weights=INT8 acts=INT8  options=''...
+Uploading dataset:  14%|█████████████████████████████▌                                                                                                                                                                                       | 12.6M/90.6M [00:05<01:17, 1.05MB/s]
+
+Uploading dataset: 90.6MB [00:30, 3.11MB/s]                                                                                                                                                                                                                                       
+Scheduled quantize job (jpvz0wqzg) successfully. To see the status and results:█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▋| 90.5M/90.6M [00:30<00:00, 3.43MB/s]
+    https://workbench.aihub.qualcomm.com/jobs/jpvz0wqzg/
+
+  [image] quantize job: jpvz0wqzg
+  [text] submitting quantize job  weights=INT8 acts=INT8  options=''...
+Uploading dataset: 1.46MB [00:00, 1.73MB/s]                                                                                                                                                                                                                                       
+Scheduled quantize job (jg99j40mg) successfully. To see the status and results:
+    https://workbench.aihub.qualcomm.com/jobs/jg99j40mg/
+
+  [text] quantize job: jg99j40mg
+Waiting for quantize job (jpvz0wqzg) completion. Type Ctrl+C to stop waiting at any time.
+    ✅ SUCCESS                          
+  Stage 2 jobs complete.
+
+=== Downloading Stage 1 + Stage 2 artifacts ===
+  [image] downloading optimized ONNX to C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub\stage1 ...
+job_j57v0xwn5_optimized_onnx_mnle6kewq.onnx.zip: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 272M/272M [00:17<00:00, 16.4MB/s]
+Downloaded model to C:\Users\ursra\AppData\Local\Temp\tmpnk1lvncj\job_j57v0xwn5_optimized_onnx_mnle6kewq.onnx.zip
+  [image] downloading quantized ONNX to C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub\stage2 ...
+job_jpvz0wqzg_qdq_onnx_mqee79g5q.onnx.zip: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 277M/277M [00:24<00:00, 12.1MB/s]
+Downloaded model to C:\Users\ursra\AppData\Local\Temp\tmpcfdvg1p3\job_jpvz0wqzg_qdq_onnx_mqee79g5q.onnx.zip
+  [text] downloading optimized ONNX to C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub\stage1 ...
+job_jp0e3r005_optimized_onnx_mn1dwyr4n.onnx.zip: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 210M/210M [00:12<00:00, 17.3MB/s]
+Downloaded model to C:\Users\ursra\AppData\Local\Temp\tmpc6w_mt70\job_jp0e3r005_optimized_onnx_mn1dwyr4n.onnx.zip
+  [text] downloading quantized ONNX to C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\diagnostics\stage_artifacts\int8-hub\stage2 ...
+job_jg99j40mg_qdq_onnx_mq99ld2yq.onnx.zip: 100%|███████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 212M/212M [00:13<00:00, 16.5MB/s]
+Downloaded model to C:\Users\ursra\AppData\Local\Temp\tmp53zhkbsy\job_jg99j40mg_qdq_onnx_mq99ld2yq.onnx.zip
+
+=== Loading sample dataset ===
+  56 images, 211 text prompts.
+
+=== Local evaluation (onnxruntime CPU) ===
+
+[Stage 0  raw fp32]  image: exported_onnx\image_encoder.onnx
+[Stage 0  raw fp32]   text: exported_onnx\text_encoder.onnx
+  [Stage 0  raw fp32] image embed[0] dtype=float32  shape=(1, 512)  min=-2.489  max=6.352  norm=9.863
+  [Stage 0  raw fp32] text  embed[0] dtype=float32  shape=(1, 512)  min=-0.922  max=5.217  norm=8.175
+[Stage 0  raw fp32] Recall@10 = 0.8698
+
+[Stage 1  hub-optimized]  image: diagnostics\stage_artifacts\int8-hub\stage1\image.onnx
+[Stage 1  hub-optimized]   text: diagnostics\stage_artifacts\int8-hub\stage1\text.onnx
+Traceback (most recent call last):
+  File "C:\Users\ursra\AppData\Local\Programs\Python\Python313\Lib\runpy.py", line 198, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+                     "__main__", mod_spec)
+  File "C:\Users\ursra\AppData\Local\Programs\Python\Python313\Lib\runpy.py", line 88, in _run_code
+    exec(code, run_globals)
+    ~~~~^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\ursra\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\launcher/../..\debugpy\__main__.py", line 71, in <module>
+    cli.main()
+    ~~~~~~~~^^
+  File "c:\Users\ursra\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\launcher/../..\debugpy/..\debugpy\server\cli.py", line 542, in main
+    run()
+    ~~~^^
+  File "c:\Users\ursra\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\launcher/../..\debugpy/..\debugpy\server\cli.py", line 361, in run_file
+    runpy.run_path(target, run_name="__main__")
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\ursra\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py", line 310, in run_path
+    return _run_module_code(code, init_globals, run_name, pkg_name=pkg_name, script_name=fname)
+  File "c:\Users\ursra\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py", line 127, in _run_module_code
+    _run_code(code, mod_globals, init_globals, mod_name, mod_spec, pkg_name, script_name)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\Users\ursra\.vscode\extensions\ms-python.debugpy-2026.6.0-win32-x64\bundled\libs\debugpy\_vendored\pydevd\_pydevd_bundle\pydevd_runpy.py", line 118, in _run_code
+    exec(code, run_globals)
+    ~~~~^^^^^^^^^^^^^^^^^^^
+  File "C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2/src/debug/stage_runner.py", line 355, in <module>
+    main()
+    ~~~~^^
+  File "C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2/src/debug/stage_runner.py", line 332, in main
+    recall = evaluate_pair(label, img_path, txt_path, images, text_tokens, inspect_first)
+  File "C:\rama\projects\LPCVC2026-Edge-Retrieval-XR2/src/debug/stage_runner.py", line 190, in evaluate_pair
+    img_sess = ort.InferenceSession(image_onnx, sess_options=sess_opts,
+                                    providers=["CPUExecutionProvider"])
+  File "c:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\.venv\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py", line 472, in __init__
+    self._create_inference_session(providers, provider_options, disabled_optimizers)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "c:\rama\projects\LPCVC2026-Edge-Retrieval-XR2\.venv\Lib\site-packages\onnxruntime\capi\onnxruntime_inference_collection.py", line 561, in _create_inference_session
+    sess.initialize_session(providers, provider_options, disabled_optimizers)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+onnxruntime.capi.onnxruntime_pybind11_state.Fail: [ONNXRuntimeError] : 1 : FAIL : Deserialize tensor val_974 failed.tensorprotoutils.cc:1094 onnxruntime::utils::GetExtDataFromTensorProto External initializer: val_974 offset: 318818304 size to read: 7077888 given file_length: 253996976 are out of bounds or can not be read in full.
+
+

@@ -9,7 +9,18 @@
       "Bash(grep -n \"from inference import\\\\|import inference\" *.py)",
       "Bash(mkdir -p src/common src/local/train src/platform src/debug)",
       "Bash(touch src/__init__.py src/common/__init__.py src/local/__init__.py src/local/train/__init__.py src/platform/__init__.py src/debug/__init__.py)",
-      "Bash(python -c \":*)"
+      "Bash(python -c \":*)",
+      "Bash(pip show:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "WebFetch(domain:workbench.aihub.qualcomm.com)",
+      "WebSearch",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe -m src.debug.stage_runner --help)",
+      "Bash(Get-ChildItem *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git fetch *)"
     ]
   }
 }
