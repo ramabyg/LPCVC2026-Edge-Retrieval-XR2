@@ -4,17 +4,19 @@ Local ONNX inference for CLIP — compares FP32 vs INT8 Recall@10.
 Runs ONNX models via ONNXRuntime and prints Recall@10 scores.
 
 Prerequisites:
-  1. Run export_onnx.py       → exported_onnx/image_encoder*.onnx + text_encoder*.onnx
-  2. Run quantize_local.py    → exported_onnx/image_encoder*_int8_*.onnx
+  1. Run src/platform/export_onnx.py   → exported_onnx/image_encoder*.onnx + text_encoder*.onnx
+  2. Run src/local/quantize.py         → exported_onnx/image_encoder*_int8_{format}_{activation}.onnx
+     or  src/local/quantize_aimet.py   → ..._int8_aimet_{variant}.onnx
 
 Usage:
-  python inference_onnx_local.py --sweep               # auto-discover all combos, print table
-  python inference_onnx_local.py --model ViT-B/16      # all available combos for one model
-  python inference_onnx_local.py --mode fp32           # FP32 only
-  python inference_onnx_local.py --mode int8           # INT8 only (legacy _int8.onnx or first discovered)
-  python inference_onnx_local.py --mode fp32_img_int8_txt
-  python inference_onnx_local.py --mode int8_img_fp32_txt
-  python inference_onnx_local.py --inspect-embeddings  # print embedding stats for first sample
+  python src/local/inference_onnx.py --sweep               # auto-discover all combos, print table
+  python src/local/inference_onnx.py --model ViT-B/16      # all available combos for one model
+  python src/local/inference_onnx.py --mode fp32           # FP32 only
+  python src/local/inference_onnx.py --mode int8           # INT8 only (first discovered, or --int8-tag)
+  python src/local/inference_onnx.py --mode int8 --int8-tag aimet_cle
+  python src/local/inference_onnx.py --mode fp32_img_int8_txt
+  python src/local/inference_onnx.py --mode int8_img_fp32_txt
+  python src/local/inference_onnx.py --inspect-embeddings  # print embedding stats for first sample
 """
 
 import sys
@@ -55,9 +57,44 @@ def load_text_tokens():
     """Tokenize all text prompts."""
     df = pd.read_csv(TXT_LIST)
     prompts = df.iloc[:, 1].dropna().tolist()
-    import torch
     tokens = clip_lib.tokenize(prompts)  # (M, 77) int64
     return [tokens[i:i+1].numpy().astype(np.int64) for i in range(len(tokens))]
+
+
+def check_embedding_health(embeddings, label, kind):
+    """
+    Warn when an encoder's embeddings are degenerate.
+
+    A broken quantization typically collapses every input to (nearly) the same
+    vector — Recall@10 then lands at ~0.00 with no other visible symptom, which
+    is exactly how the AIMET -inf causal-mask bug presented.  Cheap to check,
+    so always run it.
+    """
+    E = np.vstack([e.reshape(1, -1).astype(np.float32) for e in embeddings])
+
+    if not np.isfinite(E).all():
+        print(f"  !! [{label}] {kind} embeddings contain NaN/Inf — model is broken.")
+        return False
+
+    norms = np.linalg.norm(E, axis=1, keepdims=True)
+    if np.any(norms == 0):
+        print(f"  !! [{label}] {kind}: {int((norms == 0).sum())} zero-norm embedding(s).")
+        return False
+
+    En = E / norms
+    S = En @ En.T
+    off_diag = S[~np.eye(len(S), dtype=bool)]
+    mean_cos = float(off_diag.mean())
+
+    if mean_cos > 0.99:
+        print(f"  !! [{label}] {kind} embeddings COLLAPSED — mean pairwise cosine "
+              f"{mean_cos:.4f} (all inputs map to the same vector). "
+              f"Recall@10 will be ~0. Check the quantization scope.")
+        return False
+    if mean_cos > 0.9:
+        print(f"  !  [{label}] {kind} embeddings suspiciously similar — "
+              f"mean pairwise cosine {mean_cos:.4f}.")
+    return True
 
 
 def print_embedding_stats(embed, label):
@@ -98,6 +135,9 @@ def run_inference(img_model_path, txt_model_path, images, text_tokens, label,
         if inspect and i == 0:
             print_embedding_stats(out[0], f"[{label}] text embed[0]")
 
+    check_embedding_health(img_output, label, "image")
+    check_embedding_health(txt_output, label, "text")
+
     if inspect and img_output and txt_output:
         img_vec = img_output[0].flatten().astype(np.float32)
         txt_vec = txt_output[0].flatten().astype(np.float32)
@@ -111,11 +151,14 @@ def run_inference(img_model_path, txt_model_path, images, text_tokens, label,
     return img_output, txt_output
 
 
-def discover_int8_combos(model_filter=None):
+def discover_int8_combos(model_filter=None, tag_filter=None):
     """
     Scan exported_onnx/ for image_encoder*_int8_*.onnx files.
     Returns list of (slug, fmt_name, act_name, img_path, txt_path).
     Only includes entries where both image and text encoder files exist.
+
+    tag_filter: optional "{format}_{activation}" string (e.g. "aimet_cle",
+    "qoperator_quint8") to restrict discovery to a single quantized build.
     """
     # Pattern: image_encoder{slug}_int8_{format}_{activation}.onnx
     pattern = re.compile(r"^image_encoder((?:_vitl14)?(?:_vitb16)?)_int8_([a-z]+)_([a-z0-9]+)\.onnx$")
@@ -128,6 +171,9 @@ def discover_int8_combos(model_filter=None):
         if not m:
             continue
         slug, fmt_name, act_name = m.group(1), m.group(2), m.group(3)
+
+        if tag_filter is not None and f"{fmt_name}_{act_name}" != tag_filter:
+            continue
 
         # Apply model filter if specified
         if model_filter is not None:
@@ -193,6 +239,14 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--int8-tag", default=None,
+        help=(
+            "Select a specific INT8 build by its '{format}_{activation}' tag, "
+            "e.g. 'aimet_cle' or 'qoperator_quint8'. Applies to both --sweep "
+            "and the targeted --mode paths."
+        ),
+    )
+    parser.add_argument(
         "--inspect-embeddings", action="store_true",
         help="Print dtype/shape/min/max/norm for the first embedding of each encoder",
     )
@@ -209,11 +263,13 @@ if __name__ == "__main__":
     # SWEEP MODE: auto-discover all available INT8 combos
     # -----------------------------------------------------------------------
     if args.sweep or (args.model is None and args.mode == "all"):
-        discovered = discover_int8_combos(model_filter=args.model)
+        discovered = discover_int8_combos(model_filter=args.model, tag_filter=args.int8_tag)
 
         if not discovered:
             print("No INT8 combo files found in exported_onnx/.")
-            print("Run: python quantize_local.py")
+            if args.int8_tag:
+                print(f"  (filtered by --int8-tag {args.int8_tag})")
+            print("Run: python src/local/quantize.py   (or src/local/quantize_aimet.py)")
             sys.exit(1)
 
         print(f"Discovered {len(discovered)} INT8 combo(s).\n")
@@ -276,14 +332,21 @@ if __name__ == "__main__":
 
     # For legacy INT8 path: prefer new-style naming, fall back to old _int8.onnx
     # Try to find at least one INT8 combo (first available)
-    discovered_for_model = discover_int8_combos(model_filter=model_name)
+    discovered_for_model = discover_int8_combos(model_filter=model_name, tag_filter=args.int8_tag)
+    int8_tag = None
     if discovered_for_model:
         _, first_fmt, first_act, IMAGE_INT8, TEXT_INT8 = discovered_for_model[0]
+        int8_tag = f"{first_fmt}_{first_act}"
+        if len(discovered_for_model) > 1:
+            others = ", ".join(f"{f}_{a}" for _, f, a, _, _ in discovered_for_model[1:])
+            print(f"Note: {len(discovered_for_model)} INT8 builds found — using '{int8_tag}'. "
+                  f"Others: {others}  (select with --int8-tag)")
     else:
         IMAGE_INT8 = os.path.join(ONNX_DIR, f"image_encoder{slug}_int8.onnx")
         TEXT_INT8  = os.path.join(ONNX_DIR, f"text_encoder{slug}_int8.onnx")
 
-    print(f"=== ONNX Local Inference: {model_name} | mode={args.mode} ===\n")
+    tag_str = f" | int8={int8_tag}" if int8_tag else ""
+    print(f"=== ONNX Local Inference: {model_name} | mode={args.mode}{tag_str} ===\n")
 
     fp32_available = os.path.exists(IMAGE_FP32) and os.path.exists(TEXT_FP32)
     int8_available = os.path.exists(IMAGE_INT8) and os.path.exists(TEXT_INT8)
@@ -291,7 +354,8 @@ if __name__ == "__main__":
     if not fp32_available:
         print("Warning: FP32 ONNX models not found. Run export_onnx.py first.")
     if not int8_available:
-        print("Warning: INT8 ONNX models not found. Run quantize_local.py first.")
+        print("Warning: INT8 ONNX models not found. "
+              "Run src/local/quantize.py (or src/local/quantize_aimet.py) first.")
     if not fp32_available and not int8_available:
         sys.exit(1)
 

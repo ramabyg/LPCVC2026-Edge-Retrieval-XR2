@@ -26,10 +26,30 @@ parser.add_argument(
     "--dtype", default="fp32", choices=["fp32", "fp16"],
     help="Export dtype: fp32 (default) or fp16 for native Hexagon FP16 compute.",
 )
+parser.add_argument(
+    "--attn-mask-clamp", default=None, type=float, metavar="M",
+    help=(
+        "Replace the causal attention mask's -inf entries with the finite value M "
+        "(e.g. -25). CLIP builds the mask with float('-inf') "
+        "(clip_model/clip/model.py:335), which survives into ONNX as 12 non-finite "
+        "initializers. Recommended value: -25. Measured 2026-08-05: any |M| >= 20 "
+        "reproduces FP32 Recall@10 exactly (0.8728); -15 and -10 perturb it. "
+        "Output filename gets a '_maskclamp' suffix so the unclamped baseline is "
+        "preserved. "
+        "NOTE: this does NOT by itself make full INT8 quantization viable -- "
+        "AIMET --quantize-all scores 0.0000 both with and without the clamp, and "
+        "the image encoder (which has no mask at all) is equally destroyed. The "
+        "clamp is worth applying because it is free and removes non-finite values "
+        "the QNN compiler would otherwise have to handle, not because it fixes "
+        "quantization. See plans_notes/aimet_quantization_review_2026-08-04.md"
+    ),
+)
 args = parser.parse_args()
 
 # Derive output filename suffix — ViT-B/16 keeps canonical names for backward compat
 dtype_suffix = "_fp16" if args.dtype == "fp16" else ""
+if args.attn_mask_clamp is not None:
+    dtype_suffix += "_maskclamp"
 if args.model == "ViT-B/16":
     image_onnx_path = os.path.join(ONNX_DIR, f"image_encoder{dtype_suffix}.onnx")
     text_onnx_path  = os.path.join(ONNX_DIR, f"text_encoder{dtype_suffix}.onnx")
@@ -58,6 +78,26 @@ print(f"Loading CLIP model ({args.model}) from clip_model...")
 clip_model, _ = clip_lib.load(args.model, device=device)
 export_dtype = torch.float16 if args.dtype == "fp16" else torch.float32
 clip_model = clip_model.to(export_dtype)
+
+# Clamp the causal attention mask before export (see --attn-mask-clamp help).
+if args.attn_mask_clamp is not None:
+    # attn_mask is a registered buffer on each ResidualAttentionBlock
+    # (clip_model/clip/model.py:184), not on Transformer.
+    n_blocks, n_bad = 0, 0
+    for mod in clip_model.modules():
+        mask = getattr(mod, "attn_mask", None)
+        if not isinstance(mask, torch.Tensor):
+            continue
+        n_bad += int((~torch.isfinite(mask)).sum())
+        clamped = torch.where(torch.isfinite(mask), mask,
+                              torch.full_like(mask, args.attn_mask_clamp))
+        mod.attn_mask = clamped.to(export_dtype)
+        n_blocks += 1
+    if n_blocks == 0:
+        print("Warning: --attn-mask-clamp given but no attn_mask buffer found — nothing to clamp.")
+    else:
+        print(f"Clamped attention mask on {n_blocks} block(s): "
+              f"{n_bad} non-finite entries -> {args.attn_mask_clamp}")
 if args.weights:
     state = torch.load(args.weights, map_location=device)
     clip_model.load_state_dict(state, strict=False)
