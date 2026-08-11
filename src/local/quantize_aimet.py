@@ -89,6 +89,106 @@ DEFAULT_QUANT_OP_TYPES = ("Conv", "ConvTranspose", "MatMul", "Gemm")
 MAX_SANE_ENCODING = 1e6
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Target hardware config.
+#
+# LPCVC 2026 target device (confirmed via qai_hub.get_devices(), 2026-08-10):
+#
+#   Samsung Galaxy S22 (Family)
+#     chipset:qualcomm-snapdragon-8gen1 / sm8450
+#     hexagon:v69
+#     htp-supports-fp16:true
+#
+# (XR2 Gen 2 was the original target but is deprecated from July 2026; LPCVC now
+# recommends the S22 family.)  So the correct AIMET backend config is the
+# **v69** family, NOT v73/v75.
+#
+# Every AIMET run before 2026-08-10 passed config_file=None, i.e. AIMET's generic
+# default_config.json.  Measured differences vs v69 (verified 2026-08-10 by
+# reading the installed JSONs — an earlier draft quoted "18 op_type / 14
+# supergroups", which is v73/v75/v79/v81, NOT v69):
+#
+#                              op_type overrides   supergroups
+#   default_config.json                2               5
+#   htp_quantsim_config_v69.json      15               3
+#
+# Supergroups turn out to be IRRELEVANT here.  v69's three are
+# (ConvTranspose,Relu), (Add,Relu), (Gemm,Relu); default's five are those plus
+# (Conv,Relu) and (Conv,Clip).  CLIP ViT contains no Relu and no Clip — its
+# activation is QuickGELU (Mul+Sigmoid) — so zero supergroups match either way.
+#
+# What actually differs for THIS model, all from the op_type overrides:
+#
+#   1. per_channel_quantization=True for Conv / Gemm / MatMul.
+#      Our graphs: image = 1 Conv + 61 MatMul + 12 Gemm, text = 61 MatMul + 12
+#      Gemm.  The generic default is per-tensor for all of them.
+#   2. Gather: is_output_quantized=False.  We have 37 Gather ops per encoder,
+#      and the token embedding lookup is one of them — so v69 says the backend
+#      does not quantize the tensor that the 2026-08-05 review flagged as the
+#      leading suspect for the text-encoder collapse.
+#   3. LayerNormalization: params.weight.is_symmetric=False (26 / 25 LayerNorms).
+#
+# (1) and (2) are the substantive hypothesis; the supergroup argument is dead.
+# Untested as of this writing.
+#
+# NOTE: htp_quantsim_config_v69.json and
+# htp_quantsim_config_v69_per_channel_linear.json are BYTE-IDENTICAL in this
+# AIMET build (2.34) — base v69 already carries the per-channel overrides.  The
+# "htp_v69_pc" shorthand is kept only so the notebook-style name resolves; it
+# selects the same contract as "htp_v69", so do not treat the two as an A/B on
+# per-channel weights.
+# ─────────────────────────────────────────────────────────────────────────────
+CONFIG_SHORTHANDS = {
+    "default": None,                                    # AIMET generic default
+    "htp_v69": "htp_quantsim_config_v69",               # Galaxy S22 / SD 8 Gen 1
+    # identical file to htp_v69 in AIMET 2.34 — alias, not a distinct variant
+    "htp_v69_pc": "htp_quantsim_config_v69_per_channel_linear",
+}
+
+
+def resolve_config_file(spec):
+    """
+    Resolve --config-file into a path AIMET accepts (or None).
+
+    Accepts, in order of precedence:
+      * None or "default"      -> None (AIMET's generic default_config.json)
+      * a shorthand key        -> see CONFIG_SHORTHANDS
+      * an existing file path  -> used as-is
+      * a bare config name     -> resolved inside aimet_onnx's quantsim_config dir
+
+    Note: AIMET's own get_path_for_target_config() builds "{name}.json", so the
+    notebook-style "htp_v75" does NOT resolve — the real filenames are
+    "htp_quantsim_config_v75.json".  Hence this resolver.
+    """
+    import glob
+    from aimet_onnx.common.quantsim_config import config_utils
+
+    cfg_dir = os.path.dirname(os.path.abspath(config_utils.__file__))
+
+    if spec is None or spec == "default":
+        return None
+    if spec in CONFIG_SHORTHANDS:
+        name = CONFIG_SHORTHANDS[spec]
+        if name is None:
+            return None
+        spec = name
+    if os.path.isfile(spec):
+        return spec
+
+    candidate = os.path.join(cfg_dir, spec if spec.endswith(".json") else spec + ".json")
+    if os.path.isfile(candidate):
+        return candidate
+
+    available = sorted(
+        os.path.basename(p)[:-5] for p in glob.glob(os.path.join(cfg_dir, "*.json"))
+    )
+    raise SystemExit(
+        f"Error: could not resolve --config-file '{spec}'.\n"
+        f"  Shorthands: {', '.join(CONFIG_SHORTHANDS)}\n"
+        f"  Configs in {cfg_dir}:\n    " + "\n    ".join(available)
+    )
+
+
 def configure_quantizers(sim, allowed_op_types, encoder_type):
     """
     Disable quantizers on every op whose type is not in `allowed_op_types`.
@@ -196,6 +296,7 @@ def quantize_encoder(
     skip_bnf: bool = False,
     skip_cle: bool = False,
     quant_op_types=DEFAULT_QUANT_OP_TYPES,
+    config_file: str = None,
 ) -> None:
     """
     Quantize a CLIP encoder using AIMET's QuantizationSimModel.
@@ -209,6 +310,10 @@ def quantize_encoder(
         skip_cle: If True, skip cross-layer equalization
         quant_op_types: Op types that keep their quantizers. None quantizes
             everything (AIMET default — known to break CLIP, see notes above).
+        config_file: Path to an AIMET quantsim config JSON. None uses AIMET's
+            generic default_config.json (per-tensor weights, 2 op_type overrides,
+            5 supergroups) — which is NOT the target hardware's behaviour. See
+            resolve_config_file().
     """
     print(f"\n[{encoder_type.upper()} Encoder] Loading ONNX model...")
     model = onnx.load(model_onnx_path)
@@ -242,6 +347,7 @@ def quantize_encoder(
         param_type="int8",
         activation_type="int8",
         quant_scheme=QuantScheme.post_training_tf_enhanced,
+        config_file=config_file,
     )
 
     # Step 3b: Restrict which ops are quantized (must happen before calibration
@@ -321,6 +427,27 @@ if __name__ == "__main__":
         help="Comma-separated op types that keep their quantizers.",
     )
     parser.add_argument(
+        "--config-file", default="default",
+        help=(
+            "AIMET quantsim config. 'default' (AIMET generic, what every run "
+            "before 2026-08-10 used), 'htp_v69' (Samsung Galaxy S22 / Snapdragon "
+            "8 Gen 1 -- the LPCVC target, confirmed via qai_hub), 'htp_v69_pc' "
+            "(alias -- byte-identical to htp_v69 in AIMET 2.34), a bare config "
+            "name, or a path to a JSON. An unresolvable value prints the "
+            "available list."
+        ),
+    )
+    parser.add_argument(
+        "--encoder", choices=("image", "text", "both"), default="both",
+        help=(
+            "Which encoder to quantize. Default 'both'. Use 'image'/'text' as "
+            "separate invocations on memory-tight hosts -- MEASURED peak RSS is "
+            "4.0-5.8 GB per encoder for ViT-B/16 (2026-08-10), so 'both' in one "
+            "process does not fit in 7.5 GB. Also makes a failed run cheap to "
+            "resume."
+        ),
+    )
+    parser.add_argument(
         "--image-onnx", default=None,
         help="Explicit FP32 image-encoder ONNX path (overrides the --model-derived name).",
     )
@@ -364,14 +491,21 @@ if __name__ == "__main__":
         if args.quantize_all:
             act_name += "allops"
 
+    config_path = resolve_config_file(args.config_file)
+
     image_onnx = args.image_onnx or os.path.join(ONNX_DIR, f"image_encoder{slug}.onnx")
     text_onnx = args.text_onnx or os.path.join(ONNX_DIR, f"text_encoder{slug}.onnx")
 
     image_out = os.path.join(ONNX_DIR, f"image_encoder{slug}_int8_{fmt_name}_{act_name}.onnx")
     text_out = os.path.join(ONNX_DIR, f"text_encoder{slug}_int8_{fmt_name}_{act_name}.onnx")
 
-    # Check FP32 inputs exist
-    for path in [image_onnx, text_onnx]:
+    # Check FP32 inputs exist (only the ones this invocation will actually read)
+    required = []
+    if args.encoder in ("image", "both"):
+        required.append(image_onnx)
+    if args.encoder in ("text", "both"):
+        required.append(text_onnx)
+    for path in required:
         if not os.path.exists(path):
             print(f"Error: {path} not found. Run: python src/platform/export_onnx.py --model ViT-B/16")
             sys.exit(1)
@@ -381,42 +515,57 @@ if __name__ == "__main__":
     print(f"  BN Folding: {not args.skip_bnf}")
     print(f"  CLE: {not args.skip_cle}")
     print(f"  Quantized ops: {'ALL' if quant_op_types is None else ', '.join(quant_op_types)}")
+    print(f"  Config file: {config_path or 'AIMET default (generic, per-tensor)'}")
+    print(f"  Encoder(s): {args.encoder}")
     print(f"  Output tag: int8_{fmt_name}_{act_name}")
     print(f"{'='*60}")
 
-    # Load calibration data
-    print(f"\n[Calibration Data] Loading...")
-    image_calib = ImageCalibrationReader()
-    image_calib_list = list(image_calib)
+    # Quantize the requested encoder(s).
+    #
+    # Each encoder is handled in its own scope and its calibration set is loaded
+    # only when needed, so peak RSS is one encoder's worth rather than both.
+    #
+    # MEASURED peak RSS per encoder, ViT-B/16, 2026-08-10 (/usr/bin/time -v):
+    #   defscope   image 5.24 GB   text 5.10 GB
+    #   htpscope   image 5.40 GB   text 3.97 GB
+    #   htpallops  image 5.80 GB   text 4.96 GB
+    # On a 7.5 GB host that fits only one encoder at a time, and only with the
+    # IDE closed -- an earlier single-process run of both was OOM-killed.
+    if args.encoder in ("image", "both"):
+        print(f"\n[Calibration Data] Loading images...")
+        image_calib_list = list(ImageCalibrationReader())
+        quantize_encoder(
+            image_onnx,
+            image_out,
+            "image",
+            image_calib_list,
+            skip_bnf=args.skip_bnf,
+            skip_cle=args.skip_cle,
+            quant_op_types=quant_op_types,
+            config_file=config_path,
+        )
+        del image_calib_list
 
-    text_calib = TextCalibrationReader()
-    text_calib_list = list(text_calib)
-
-    # Quantize image encoder
-    quantize_encoder(
-        image_onnx,
-        image_out,
-        "image",
-        image_calib_list,
-        skip_bnf=args.skip_bnf,
-        skip_cle=args.skip_cle,
-        quant_op_types=quant_op_types,
-    )
-
-    # Quantize text encoder
-    quantize_encoder(
-        text_onnx,
-        text_out,
-        "text",
-        text_calib_list,
-        skip_bnf=args.skip_bnf,
-        skip_cle=args.skip_cle,
-        quant_op_types=quant_op_types,
-    )
+    if args.encoder in ("text", "both"):
+        print(f"\n[Calibration Data] Loading text...")
+        text_calib_list = list(TextCalibrationReader())
+        quantize_encoder(
+            text_onnx,
+            text_out,
+            "text",
+            text_calib_list,
+            skip_bnf=args.skip_bnf,
+            skip_cle=args.skip_cle,
+            quant_op_types=quant_op_types,
+            config_file=config_path,
+        )
+        del text_calib_list
 
     print("\n" + "="*60)
     print("AIMET Quantization complete")
     print("="*60)
-    print(f"  {image_out}")
-    print(f"  {text_out}")
+    if args.encoder in ("image", "both"):
+        print(f"  {image_out}")
+    if args.encoder in ("text", "both"):
+        print(f"  {text_out}")
     print(f"\nNext: python src/local/inference_onnx.py --model {model_name} --sweep --inspect-embeddings")

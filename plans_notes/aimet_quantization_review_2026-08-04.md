@@ -3,7 +3,16 @@
 **Date:** 2026-08-04
 **Branch:** `quantization_wt_aimet`
 **Files reviewed:** `src/local/quantize_aimet.py`, `src/local/inference_onnx.py`
-**Status:** review complete, no fixes applied yet — resume from "Next steps" at the bottom.
+**Status:** Phase 0 executed 2026-08-10 — **results are the LAST section of this
+file, "PHASE 0 — RESULTS"**. Headline: `defscope` = **0.8610**, the best INT8
+result to date. Open work is in "Next steps"; the next action is item 6
+(leave-one-out bisection).
+
+> **Reading order note.** Sections above are in the order they were written
+> (2026-08-04 review → 08-05 mask work → 08-10 Phase 0). New results are
+> **appended at the end**, not interleaved. Three sections mention "Phase 0":
+> the commands (recipe), the pre-run rationale (superseded), and the results
+> (last section) — the results are the one you want.
 
 ---
 
@@ -32,6 +41,23 @@
    See "What is still NOT demonstrated."
 5. The "order-dependent quantizer disabling" concern was **overstated**: it is
    latent and cannot trigger on these two graphs. Low priority.
+6. **PHASE 0 RAN 2026-08-10. Two results.**
+   **(a) The scope-restricted AIMET build works: `defscope` = 0.8610** — best
+   INT8 result to date, +0.0354 over ORT static INT8 at equal scope (0.8256),
+   −0.0118 vs FP32. This configuration had simply never been run.
+   **(b) The target-hardware config hypothesis is dead — the config is *inert*.**
+   `htp_v69` produces **byte-identical artifacts** to the generic default and an
+   identical sim (371 quantizers, 297 enabled, same op-type breakdown). Every
+   v69/default difference is a no-op on this graph: AIMET 2.34 already does
+   per-channel by default, Gather outputs are already unquantized, and no
+   supergroup matches (no Relu in CLIP ViT). Phase 0 could not have
+   distinguished the two configs. See "PHASE 0 — RESULTS".
+   **Correction:** an earlier draft claimed v69 has "18 op_type overrides and 14
+   supergroups" — those belong to v73/v75/v79/v81; v69 has 15 and 3.
+7. **Target device changed.** XR2 Gen 2 is deprecated from July 2026; LPCVC now
+   recommends **Samsung Galaxy S22 (Family)** → Snapdragon 8 Gen 1 / sm8450 /
+   **hexagon v69**. All prior on-device numbers in this document were measured on
+   XR2 Gen 2 and are no longer the target.
 
 ---
 
@@ -413,12 +439,18 @@ Env: `/mnt/rama_ml/conda_envs/lpcvc/bin/python`, `aimet-onnx` 2.34.0
 ## Current artifacts on disk
 
 ```
-exported_onnx/image_encoder_int8_aimet_cleallops.onnx   346 MB   Aug 4 05:47
-exported_onnx/text_encoder_int8_aimet_cleallops.onnx    255 MB   Aug 4 05:49
+image_encoder_int8_aimet_cleallops.onnx    346 MB  Aug  4   0.0000
+text_encoder_int8_aimet_cleallops.onnx     255 MB  Aug  4
+image_encoder_int8_aimet_clampallops.onnx  346 MB  Aug  5   0.0000
+text_encoder_int8_aimet_clampallops.onnx   255 MB  Aug  5
+image_encoder_int8_aimet_defscope.onnx     330 MB  Aug 10   0.8610  <- BEST
+text_encoder_int8_aimet_defscope.onnx      244 MB  Aug 10
 ```
 
-Only the `--quantize-all` variant has been produced. The scope-restricted default
-has not been run.
+`htpscope` and `htpallops` were byte-for-byte duplicates of `defscope` and
+`clampallops` respectively (verified with `cmp`) and were **deleted 2026-08-11**,
+reclaiming 1.1 GB. They are reproducible from the Phase 0 commands if ever
+needed, but there is no reason to: the config that produced them is inert.
 
 ---
 
@@ -492,6 +524,198 @@ and the tensors it exposes disappear.
 
 ---
 
+## Phase 0 commands (2x2 config x scope matrix) — EXECUTED 2026-08-10
+
+> **These commands have been run. For what happened, jump to
+> "PHASE 0 — RESULTS (RAN 2026-08-10)" below.** Headline: `defscope` = **0.8610**
+> (best INT8 to date), `htp_v69` turned out to be inert, `--quantize-all` still
+> 0.0000. This section is retained as the reproduction recipe.
+
+**Three** quantization builds + one sweep — the fourth cell of the matrix is
+already measured:
+
+| | scope-restricted (Conv/MatMul/Gemm) | `--quantize-all` |
+|---|---|---|
+| generic `default` config | **A** — never run | `clampallops` = **0.0000** (done 2026-08-05) |
+| `htp_v69` | **B** | **C** — the on-device-speed candidate |
+
+(The originally-planned build D, "htp_v69 plain vs per-channel," is dropped:
+the two config files are byte-identical, so it would have rebuilt C.)
+
+Each build quantizes both encoders (~2-4 min each), so budget ~15 min for the
+builds and ~30-40 min for the sweep, which also re-scores the two existing
+`*allops` builds.
+
+Common preamble:
+
+```bash
+cd /mnt/rama_ml/projects/LPCVC2026-Edge-Retrieval-XR2
+export LPCVC_DATA_DIR=/mnt/rama_ml/data/lpcvc_track1_sample_data
+PY=/mnt/rama_ml/conda_envs/lpcvc/bin/python
+TXT=exported_onnx/text_encoder_maskclamp.onnx    # mask-clamped export (M = -25)
+```
+
+All four use the clamped text encoder so the mask is not a confounder, and
+`--skip-cle --skip-bnf` because both are measured no-ops (Finding 1).
+
+```bash
+# A. generic default config + scope-restricted  <- the never-run baseline
+$PY src/local/quantize_aimet.py --skip-cle --skip-bnf \
+    --config-file default --text-onnx $TXT --variant defscope
+
+# B. htp_v69 + scope-restricted
+$PY src/local/quantize_aimet.py --skip-cle --skip-bnf \
+    --config-file htp_v69 --text-onnx $TXT --variant htpscope
+
+# C. htp_v69 + quantize-all                  <- the on-device-speed candidate
+$PY src/local/quantize_aimet.py --skip-cle --skip-bnf --quantize-all \
+    --config-file htp_v69 --text-onnx $TXT --variant htpallops
+```
+
+Then benchmark everything discovered in `exported_onnx/`:
+
+```bash
+$PY src/local/inference_onnx.py --sweep --inspect-embeddings
+```
+
+Reference points for reading the table:
+
+| | Recall@10 |
+|---|---|
+| FP32 | 0.8728 |
+| ORT static INT8, Conv/MatMul/Gemm only | 0.8256 |
+| AIMET quantize-all, default config (`cleallops` / `clampallops`) | 0.0000 |
+
+What each outcome means:
+
+- **A ≈ 0.82-0.87** — scope restriction works in AIMET too; the config was never
+  the issue. Proceed to Phase 1 to find what full quantization breaks.
+- **A low but B high** — the HTP config is what matters, and the earlier collapse
+  was largely an artifact of using the generic default.
+- **C usable** — the most valuable outcome: full int8 with no float
+  boundaries, i.e. an actual candidate for an on-device latency win. Push it
+  through `compile_and_profile.py` against **Samsung Galaxy S22 (Family)**.
+- **C >> `clampallops` (0.0000)** — since supergroups are ruled out and the
+  configs differ only in per-channel weights, the `Gather` output rule, and
+  LayerNorm weight symmetry, the credit belongs to one of those three. The
+  `Gather` rule is the prime suspect (it covers the token-embedding tensor);
+  confirm by re-running C with `Gather` forced back to quantized rather than
+  assuming.
+- **All still ~0.0** — the config hypothesis is dead too; go straight to Phase 1
+  QuantAnalyzer on the image encoder.
+
+Watch for the `check_embedding_health()` warnings in the sweep output — but
+remember it detects *collapse*, not *scrambling*: the 0.0137 image encoder passed
+it silently. Trust the Recall@10 number over the absence of a warning.
+
+---
+
+## PHASE 0 — pre-run rationale (SUPERSEDED — kept for the record)
+
+> **Historical.** This section argues *why* Phase 0 was worth running. It was
+> run on 2026-08-10 and the config hypothesis came back **inert** — see
+> "PHASE 0 — RESULTS" above. Nothing below is a pending action.
+
+### Target device, confirmed
+
+XR2 Gen 2 is deprecated from July 2026. LPCVC recommends **Samsung Galaxy S22
+(Family)**. Queried via `qai_hub.get_devices()` on 2026-08-10 — not assumed:
+
+```
+Samsung Galaxy S22 (Family)   os:android
+  chipset:qualcomm-snapdragon-8gen1      chipset:sm8450
+  hexagon:v69
+  htp-supports-fp16:true
+  framework:qnn / onnx / tflite
+```
+
+So the AIMET backend config family is **v69** — not the v73/v75 used in AIMET's
+own example notebook. Also note `htp-supports-fp16:true`: native FP16 on this HTP
+is a real alternative to INT8 and `export_onnx.py --dtype fp16` already exists.
+
+### Why this is the next experiment
+
+Every AIMET run to date passed `config_file=None`.
+
+### Phase 0 config facts, corrected (measured 2026-08-10)
+
+Read directly from the installed JSONs in
+`aimet_onnx/common/quantsim_config/`. An earlier draft of this section asserted
+v69 had 18 op_type overrides and 14 supergroups and built the whole rationale on
+supergroup fusion. **Both numbers were wrong** — they belong to v73/v75/v79/v81:
+
+| Config | op_type overrides | supergroups |
+|---|---|---|
+| `default_config.json` (what we used) | 2 | 5 |
+| `htp_quantsim_config_v69.json` | **15** | **3** |
+| `htp_quantsim_config_v69_per_channel_linear.json` | 15 | 3 (identical file) |
+| `htp_quantsim_config_v73/v75/v79/v81.json` | 18 | 14 |
+
+Two corrections follow, both of which shrink the hypothesis:
+
+1. **The supergroup argument is dead.** v69's three supergroups are
+   `(ConvTranspose,Relu)`, `(Add,Relu)`, `(Gemm,Relu)`; the generic default's
+   five are those plus `(Conv,Relu)` and `(Conv,Clip)`. CLIP ViT contains **no
+   Relu and no Clip** — its activation is QuickGELU (`Mul`+`Sigmoid`). Zero
+   supergroups match under either config, so this mechanism cannot explain
+   anything here. v69 in fact has *fewer* supergroups than the default.
+2. **`htp_v69` and `htp_v69_pc` are byte-identical** in AIMET 2.34 (verified by
+   sorted-key diff). Base v69 already carries the per-channel overrides. There
+   is no per-channel A/B to run — the planned build D was a duplicate of C.
+
+### What actually differs for this model
+
+All of it comes from the op_type overrides, and all three are real:
+
+| v69 override | Ops in image enc | Ops in text enc |
+|---|---|---|
+| `per_channel_quantization=True` for Conv/Gemm/MatMul | 1 + 12 + 61 | 12 + 61 |
+| **`Gather: is_output_quantized=False`** | 37 | 37 |
+| `LayerNormalization: params.weight.is_symmetric=False` | 26 | 25 |
+
+The `Gather` rule is the interesting one: it directly addresses the outstanding
+`token_embedding.weight_scale: shape=()` observation. The token-embedding lookup
+is a `Gather`, and v69 says the backend does not quantize Gather outputs at all
+— so the tensor the 2026-08-05 review flagged as the leading suspect is one the
+target hardware would have left alone, while `default_config.json` quantized it.
+
+**This is a hypothesis, not a finding.** Four hypotheses in this investigation
+have already been wrong, and the first draft of *this* one was wrong twice over
+before a single run. It is worth running first only because it is cheap.
+
+### API gotchas found while reading AIMET's quant_analyzer.ipynb
+
+Relevant to Phase 1/2, recorded here so they are not rediscovered:
+
+1. `from aimet_common.utils import CallbackFunc` **raises ImportError** in our env
+   (both `aimet_onnx` and `aimet_torch` installed, `aimet_common` deprecated since
+   v2.20). Use `from aimet_onnx.common.utils import CallbackFunc`.
+2. `QuantAnalyzer.__init__` in 2.34 is typed
+   `(model, dummy_input, forward_pass_callback: Callable[[InferenceSession], Any],
+   eval_callback: Callable[[InferenceSession], float])` — **plain callables**, not
+   the notebook's `CallbackFunc` wrappers. `CallbackFunc` still exists; confirm
+   which the implementation accepts before writing the script.
+3. The notebook's `config_file="htp_v75"` **does not resolve**.
+   `get_path_for_target_config()` builds `"{name}.json"`, but the real filenames
+   are `htp_quantsim_config_v75.json`. Hence `resolve_config_file()` in
+   `quantize_aimet.py`, which accepts shorthands (`htp_v69`, `htp_v69_pc`), bare
+   names, or full paths, and lists the available configs on a miss.
+
+### Phase 1/2 design note (QuantAnalyzer)
+
+`eval_callback` receives **one** InferenceSession, but Recall@10 needs both
+encoders. Resolution: precompute the *other* encoder's FP32 embeddings once, and
+score the session under test against them — i.e. exactly the existing
+`int8_img_fp32_txt` / `fp32_img_int8_txt` modes. Run the image encoder first: no
+causal mask, no embedding table, no EOS path.
+
+Runtime risk: `analyze()` runs the eval callback once per layer, twice (enable and
+disable sweeps). With ~74 quantized layers and quantsim being materially slower
+than plain ORT, budget 1-3 h per encoder. `enable_per_layer_mse_loss()` is much
+cheaper (no eval) and may localize the problem on its own.
+
+---
+
 ## Next steps (resume here)
 
 1. ~~Measure the pre-mask logit range~~ — **DONE 2026-08-05.** D = 26.75.
@@ -502,10 +726,10 @@ and the tensors it exposes disappear.
    removes non-finite values the QNN compiler would have to handle.
 4. ~~Run `--quantize-all` on the clamped export~~ — **DONE 2026-08-05 → 0.0000.**
    Hypothesis falsified. See the negative-result section.
-5. **Run the scope-restricted default** (`DEFAULT_QUANT_OP_TYPES`, still never
-   executed) on the clamped export. This is now the most likely path to a usable
-   AIMET INT8 build, and gives the AIMET-vs-ORT comparison at equal scope
-   (ORT reference: 0.8256).
+5. ~~**PHASE 0 — the 2x2 config/scope matrix**~~ — **DONE 2026-08-10.**
+   `defscope` = `htpscope` = **0.8610** (best INT8 to date); `htpallops` =
+   0.0000. The config lever is inert — see "PHASE 0 — RESULTS". Do not spend
+   more time on quantsim config files for this model.
 6. **Leave-one-out bisection** to find what full quantization actually breaks:
    from all-quantized, return one op type at a time to float
    (`Gather`, `LayerNormalization`, `Softmax`, `Mul`/`Sigmoid`, `Add`).
@@ -579,7 +803,7 @@ independent toolchains**:
 | Toolchain | All ops quantized | Conv/MatMul/Gemm only |
 |---|---|---|
 | ONNX Runtime static (`quantize.py`) | 0.1003 | 0.8256 |
-| AIMET `QuantizationSimModel` | 0.0000 | not yet run |
+| AIMET `QuantizationSimModel` | 0.0000 | **0.8610** (measured 2026-08-10) |
 
 The op-type restriction in `DEFAULT_QUANT_OP_TYPES` exists for a good reason. The
 "reframe" argued earlier in this document — *exclusions should be counted in ~12-24
@@ -635,7 +859,10 @@ Important before drawing conclusions or writing this up publicly:
 | `-inf` → inf quantizer step → attention collapse | **Partially refuted.** The mask does affect the model (mean cosine 1.0000 → 0.9938 when clamped), but it is not the dominant cause — see the negative result above |
 | **Clamping the mask makes `--quantize-all` viable** | **TESTED 2026-08-05 → FALSE.** Recall@10 = 0.0000 clamped, same as unclamped |
 | Full activation quantization destroys CLIP (both encoders, two toolchains) | **Measured** |
-| Token embedding per-tensor quantization is the culprit | **Candidate only, unmeasured** |
+| Scope-restricted AIMET INT8 is usable (0.8610, beats ORT's 0.8256) | **Measured 2026-08-10** |
+| Target-hardware (`htp_v69`) config changes the result | **TESTED → FALSE, and untestable as posed.** Byte-identical artifacts and identical sim state vs the generic default; every differing rule is a no-op on this graph |
+| AIMET 2.34 applies per-channel weights without being asked | **Measured** — 50 per-channel scale vectors in a default-config artifact |
+| Token embedding per-tensor quantization is the culprit | **Candidate only, unmeasured.** Note it is *not* explained by config choice — Gather outputs are unquantized under both configs |
 | Dequant/requant boundaries cause the on-device slowdown | **Hypothesis only.** Only an XR2 profiling run can test it |
 
 The headline story tried in this session — "a `-inf` in the exported graph is what
@@ -659,5 +886,101 @@ cause.
 | AIMET INT8 `clampallops` (quantize-all, mask clamped −25) | **0.0000** | — | — |
 | AIMET INT8 `clampallops` image only + FP32 text | **0.0137** | — | — |
 | ORT static INT8 (`quantize.py`) | 0.8256 | 0.6804 | 39.1 ms (slower than FP32) |
-| AIMET INT8 `cleallops` (quantize-all, unclamped mask) | collapsed (~0.0) | — | — |
-| AIMET INT8 scope-restricted | not yet run | — | — |
+| AIMET INT8 `cleallops` (quantize-all, unclamped mask) | 0.0000 | — | — |
+| **AIMET INT8 `defscope` (scope-restricted, default config)** | **0.8610** | — | not yet profiled |
+| **AIMET INT8 `htpscope` (scope-restricted, htp_v69)** | **0.8610** (byte-identical to `defscope`) | — | — |
+| AIMET INT8 `htpallops` (quantize-all, htp_v69) | 0.0000 (byte-identical to `clampallops`) | — | — |
+
+**Best INT8 to date: `defscope` / `htpscope` at 0.8610.** It is the obvious
+candidate for the next on-device profiling run — but note it is scope-restricted,
+so it carries the same ~200 float-compute ops that are the suspected cause of the
+39.1 ms ORT INT8 result. It should be expected to fix Recall@10, **not** latency.
+
+---
+
+## PHASE 0 — RESULTS (RAN 2026-08-10)
+
+Three builds (A/B/C), six invocations, all exit 0; then
+`inference_onnx.py --sweep --inspect-embeddings`.
+
+```
+Model      Format   Activation     Recall@10   vs FP32
+ViT-B/16   FP32     —                 0.8728
+ViT-B/16   aimet    defscope          0.8610   -0.0118   <- A, NEW
+ViT-B/16   aimet    htpscope          0.8610   -0.0118   <- B, NEW
+ViT-B/16   aimet    htpallops         0.0000   -0.8728   <- C, NEW
+ViT-B/16   aimet    clampallops       0.0000   -0.8728   (2026-08-05)
+ViT-B/16   aimet    cleallops         0.0000   -0.8728   (2026-08-04)
+```
+
+### Result 1 — scope-restricted AIMET works, and beats ORT
+
+**`defscope` = 0.8610**, the configuration that had never been run. This is the
+best INT8 number the project has: **+0.0354 over ORT static INT8 at the same
+scope (0.8256)**, and only **−0.0118** below the FP32 ONNX baseline. Embeddings
+are healthy (no collapse warning, `cos(img[0],txt[0]) = 0.2545` vs FP32's
+0.2565). The op-type restriction is sound in AIMET, and AIMET is the better
+toolchain at equal scope.
+
+### Result 2 — `--config-file htp_v69` is INERT (not "refuted" — inert)
+
+The config never changed anything. Three independent checks:
+
+1. **Byte-identical artifacts.** `md5sum` of the quantized ONNX:
+   ```
+   f32dea45…  image_encoder_int8_aimet_defscope.onnx
+   f32dea45…  image_encoder_int8_aimet_htpscope.onnx     <- same
+   4df4691c…  image_encoder_int8_aimet_htpallops.onnx
+   4df4691c…  image_encoder_int8_aimet_clampallops.onnx  <- same as a DEFAULT-config
+                                                            build from 2026-08-05
+   ```
+   Same pattern for both text encoders.
+2. **Identical sim state.** Building `QuantizationSimModel` on
+   `text_encoder_maskclamp.onnx` with `config_file=None` vs the v69 JSON gives
+   **371 total quantizers, 297 enabled** in both, with an identical
+   enabled-by-op-type breakdown
+   (`Mul 48, Gemm 48, Add 37, MatMul 25, LayerNormalization 25, Softmax 12, Sigmoid 12`).
+3. The build banner confirms the resolved path was passed, so this is not a
+   plumbing bug in `resolve_config_file()`.
+
+**Why it is inert** — each of the three differences identified above turns out to
+be a no-op on this graph, for a *different* reason:
+
+| v69 override | Why it changes nothing here |
+|---|---|
+| per-channel for Conv/Gemm/MatMul | AIMET 2.34 already does this by default. The `defscope` artifact (built with the generic default) contains **50 per-channel scale vectors** — `visual.conv1.weight_scale (768,)`, `…out_proj.weight_scale (768,)`, `(2304,)`, `(3072,)`. We never call `enable_per_channel_quantization()`; AIMET does it internally. |
+| `Gather: is_output_quantized=False` | Gather outputs are **already unquantized** under the default config — `Gather` does not appear in the enabled-output-quantizer list for either config. The rule asks for behaviour that was already in place. |
+| `LayerNormalization` weight asymmetry | Under scope restriction the LayerNorm quantizers are disabled anyway; under `--quantize-all` the artifacts are byte-identical, so it is not being applied. |
+| supergroups | Already ruled out: no Relu/Clip in CLIP ViT. |
+
+So the honest statement is **not** "the target-hardware config doesn't help."
+It is: **for these two graphs, `htp_quantsim_config_v69.json` and AIMET 2.34's
+generic default describe the same quantization contract**, so Phase 0 could not
+have distinguished them. The hypothesis was untestable as posed, and the
+`token_embedding` per-tensor observation is *not* explained by config choice.
+
+**This is the fifth hypothesis in this investigation to fail.** It is also the
+second one (after `-1e4`) that failed for a reason visible by inspection before
+running anything — the per-channel scales were already in the artifacts on disk.
+
+### Result 3 — full activation quantization still destroys the model
+
+`htpallops` = 0.0000, byte-identical to `clampallops`. Text encoder collapses
+(mean pairwise cosine 0.9938). The three-way tie
+`cleallops`/`clampallops`/`htpallops` ≈ 0.0000 now covers unclamped mask, clamped
+mask, and target-hardware config. **`--quantize-all` is dead by every lever tried
+so far**; only the leave-one-out bisection can localize it.
+
+### Measured peak RSS (new, useful for scheduling)
+
+| Build | image | text |
+|---|---|---|
+| `defscope` | 5.24 GB | 5.10 GB |
+| `htpscope` | 5.40 GB | 3.97 GB |
+| `htpallops` | **5.80 GB** | 4.96 GB |
+
+ViT-B/16 quantsim needs **4–5.8 GB per encoder** — far above the ~3 GB assumed
+earlier (that figure was where the OOM killer struck, not the requirement). On
+the 7.4 GB ThinkPad this fits only one encoder at a time with the IDE closed;
+hence `quantize_aimet.py --encoder image|text|both`. Two runs were OOM-killed on
+2026-08-10 before this was understood, one of which took down the tmux session.
