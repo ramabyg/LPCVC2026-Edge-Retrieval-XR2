@@ -20,7 +20,20 @@
       "Bash(Get-ChildItem *)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Read(//tmp/aimetcheck/**)",
+      "Bash(unzip -p aimet_torch-2.34.0-py310-none-any.whl '*.dist-info/METADATA')",
+      "WebFetch(domain:qualcomm.github.io)",
+      "Bash(pip list *)",
+      "Bash(nvidia-smi)",
+      "Bash(git checkout *)",
+      "Bash(export LPCVC_DATA_DIR=/mnt/rama_ml/data/lpcvc_track1_sample_data)",
+      "Bash(timeout 600 /mnt/rama_ml/conda_envs/lpcvc/bin/python src/local/quantize_aimet.py)",
+      "Bash(/mnt/rama_ml/conda_envs/lpcvc/bin/python src/local/quantize_aimet.py)",
+      "Bash(env)",
+      "Bash(LPCVC_DATA_DIR=/mnt/rama_ml/data/lpcvc_track1_sample_data timeout 3000 python src/local/inference_onnx.py --model ViT-B/16 --mode all --int8-tag aimet_cle --inspect-embeddings)",
+      "Bash(LPCVC_DATA_DIR=/mnt/rama_ml/data/lpcvc_track1_sample_data timeout 3000 python -c ' *)",
+      "Bash(/mnt/rama_ml/conda_envs/lpcvc/bin/python -c ' *)"
     ]
   }
 }

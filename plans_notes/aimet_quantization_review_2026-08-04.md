@@ -984,3 +984,301 @@ earlier (that figure was where the OOM killer struck, not the requirement). On
 the 7.4 GB ThinkPad this fits only one encoder at a time with the IDE closed;
 hence `quantize_aimet.py --encoder image|text|both`. Two runs were OOM-killed on
 2026-08-10 before this was understood, one of which took down the tmux session.
+
+---
+
+## PHASE 1 — LEAVE-ONE-OUT BISECTION (RAN 2026-08-11)
+
+Tooling added: `quantize_aimet.py --exclude-op-types` (deny-list mode — start from
+fully-quantized, return listed op types to float). `configure_quantizers()` now
+takes either an allow-list or a deny-list, never both.
+
+### Result 1 — the `token_embedding` candidate is REFUTED
+
+The standing candidate from the static inspection above — `token_embedding.weight`
+quantized **per-tensor** with a calibrated range of ≈`[-0.068, +0.159]` against an
+actual table range of `[-0.442, +0.463]` — does not explain the collapse.
+
+```
+Build: --encoder text --text-onnx text_encoder_maskclamp.onnx --exclude-op-types Gather
+       330 quantizers kept, 1 disabled          (exit 0, peak RSS 4.95 GB)
+
+FP32 img + FP32 txt                Recall@10 = 0.8728
+FP32 img + allops_noGather txt     Recall@10 = 0.0030   (-0.8698)
+  text embeddings COLLAPSED — mean pairwise cosine 1.0000
+  cosine_sim(img[0], txt[0]) = 0.0099   (FP32: 0.2565)
+```
+
+Note the run is a **clean one-tensor experiment**: `Gather` contributes exactly
+one quantizer to this graph (the embedding-table param), because Gather *outputs*
+were already unquantized under both configs. Returning that single tensor to float
+changed nothing — collapse is still total, and identical to `clampallops`.
+
+**This is the sixth failed hypothesis in this investigation**, and the third to
+have been flagged as "candidate only / unmeasured" before testing. The pattern is
+now consistent enough to be the finding: *static inspection of the quantized
+artifact has not once identified the cause.* Only scope manipulation has moved the
+number.
+
+### Reframe — the search space is exactly five op types
+
+Rather than guess a seventh candidate, note that two measured endpoints bracket
+the problem precisely:
+
+| Scope | Op types quantized | Recall@10 |
+|---|---|---|
+| `defscope` | `Conv, ConvTranspose, MatMul, Gemm` | **0.8610** |
+| `--quantize-all` | above **+ `Mul, Add, LayerNormalization, Softmax, Sigmoid`** | **0.0000** |
+
+The culprit is inside that 5-op-type difference — nothing else varies. This also
+means the **add-one-in direction is the right one and needs no new code**:
+`--quant-op-types` already expresses it, and every intermediate build is a
+potentially *shippable* scope (unlike leave-one-out builds, which are all near-zero
+until the last one). The `--exclude-op-types` flag stays as the complementary
+direction, but add-one-in is cheaper per bit of information here.
+
+Binary split under test (text encoder, mask-clamped input, sequential — ~5 GB each):
+
+* `addlnsoftmax` = `defscope + LayerNormalization, Softmax` — normalization /
+  attention-probability path
+* `addmulsigadd` = `defscope + Mul, Sigmoid, Add` — residual stream + QuickGELU
+  (`x * sigmoid(1.702x)`)
+
+If both collapse, the causes are additive and each half needs splitting again. If
+neither collapses, the interaction is between halves — which would itself be new
+information.
+
+### Side note — evaluation harness for text-only builds
+
+`inference_onnx.py --sweep` discovery requires a matching `image_encoder` artifact
+for the same tag, so it cannot score a text-only bisection build. Bisection runs
+are scored with a small driver that reuses the module's own `load_images()` /
+`load_text_tokens()` / `run_inference()` and computes an FP32/FP32 reference **in
+the same process**, so the delta is measured rather than compared against a
+remembered 0.8728. That reference reproduced 0.8728 exactly, which validates the
+harness. Artifacts are deleted after scoring — 255 MB each, only the number matters.
+
+### Result 2 — ROOT CAUSE FOUND: `Add` (residual stream massive activations)
+
+The add-one-in sweep resolved it in four builds. All numbers below are
+**FP32 image + INT8 text**, mask-clamped text export, FP32/FP32 reference computed
+in the same process.
+
+| Text-encoder scope | Recall@10 | vs text-only FP32 |
+|---|---|---|
+| FP32 | 0.8728 | — |
+| `defscope` = `Conv, ConvTranspose, MatMul, Gemm` | 0.8522 | -0.0205 |
+| **`defscope + LayerNormalization, Softmax`** | **0.8592** | **-0.0135** |
+| `defscope + Mul, Sigmoid` | 0.8503 | -0.0225 |
+| `defscope + LN, Softmax, Mul, Sigmoid` (= all except `Add`) | 0.8247 | -0.0481 |
+| `defscope + Add` | **0.0000** | -0.8728 (collapsed) |
+
+`Add` alone reproduces the full collapse. Everything else is survivable.
+
+**The mechanism, from the calibrated ranges** (`scratchpad/dump_add_encodings.py`,
+50 Add quantizers):
+
+| Add op | Calibrated range | step | Role |
+|---|---|---|---|
+| `node_add` | `[-0.445, +0.776]` | 0.0048 | positional-embedding add — fine |
+| `node_add_1` | `[-0.673, +0.946]` | 0.0064 | layer-0 attention residual — fine |
+| `node_Add_73`, `node_Add_156`, … | in `[-25.0, 0.0]`, out `[-30, +15]` | 0.177 | **causal-mask add — fine** |
+| `node_add_2` … `node_add_24` | `[-264, +396]` | **2.59** | **residual stream — the killer** |
+
+From layer 1's MLP onward the residual stream carries **massive activations of
+≈±400** while ordinary residual values are order ~1. A per-tensor int8 grid over
+that range has a step of **2.59** — every normal activation lands in one or two
+buckets, so all 211 prompts produce the same vector. That is precisely the
+observed signature: mean pairwise cosine **1.0000**, `cos(img[0],txt[0]) = 0.0099`.
+
+This is the known transformer *massive activation / outlier feature* phenomenon,
+and it explains why every earlier hypothesis missed: none of them could affect the
+residual-stream range.
+
+### The mask hypothesis is now settled (and was a red herring)
+
+The causal-mask `Add` calibrates to `[-25, 0]` with **step 0.177** — completely
+benign. The `-inf` → `-25` clamp work from 2026-08-04/05 was correct and is worth
+keeping (a raw `-inf` will trouble the QNN compiler regardless, and the clamp is
+provably free at |M| ≥ 20), but it has **no connection to the INT8 collapse**.
+Three sessions of mask investigation were chasing a tensor that quantizes fine.
+
+### Corrections to earlier claims in this document / CLAUDE.md
+
+1. **"Softmax/LayerNorm poisoned"** (CLAUDE.md Key Learnings #3, carried over from
+   the ORT-era debugging, which reasoned that attention softmax's outlier-prone
+   distributions defeat quantization) — **false for AIMET**. Quantizing exactly
+   `LayerNormalization + Softmax` is the *best* scope found: 0.8592, **better than
+   `defscope`'s 0.8522** while quantizing more ops. Whatever broke ORT, it was not
+   these two op types.
+2. **`Add` contributes 50 quantizers, not 37.** The `Mul 48, Gemm 48, Add 37, …`
+   breakdown recorded earlier counted *enabled output* quantizers only.
+3. **Errors are additive, not independent.** LN+Softmax alone costs 0.0136 and
+   Mul+Sigmoid alone 0.0225, but together they cost 0.0481 — more than the sum.
+   Maximum scope is therefore *not* free; there is a real accuracy/scope tradeoff.
+
+### Why this is good news for latency, not just accuracy
+
+Keeping `Add` in float is **not a compromise on the latency axis**: elementwise
+adds are memory-bound, not the compute bottleneck. The compute-heavy ops
+(`MatMul`/`Gemm`/`Conv`) are all quantized in every viable scope above. The
+suspicion that `defscope`'s float ops caused ORT INT8 to profile *slower* than
+FP32 (39.1 ms vs 31.4 ms) is therefore still open — but `bestscope` moves
+`LayerNormalization` and `Softmax` into int8 on top of `defscope`, which reduces
+the dequant/requant boundary count while *improving* Recall@10. It is the better
+candidate for the next XR2 profiling run. **Still a hypothesis — only a device run
+tests it.**
+
+### Methodology note worth keeping
+
+Seven hypotheses in this investigation were generated by inspecting the quantized
+artifact; all seven failed. The op-type sweep found the cause in four builds and
+then the encoding dump explained it in one. The ordering that worked was
+**scope manipulation to localize, then inspection to explain** — not inspection to
+generate candidates. Note the encoding dump was decisive *once pointed at a
+confirmed op type*: the same tool aimed at `token_embedding` earlier produced a
+plausible, wrong story.
+
+### Tooling / harness notes
+
+* `--exclude-op-types` (deny-list) works and was used for the all-except-`Add`
+  build, but **add-one-in via `--quant-op-types` is the more useful direction**:
+  every intermediate build is a potentially shippable scope, whereas leave-one-out
+  builds are all ~0.0000 until the last one.
+* Output-tag bug fixed: bisection builds now tag as `allopsno<excluded>` instead of
+  colliding on `aimet_cle` and silently overwriting each other.
+* AIMET 2.34 quantizer encodings are read via `q.get_encodings()`; there is no
+  `q.encoding` attribute.
+* Peak RSS across nine builds: 4.47–5.17 GB per encoder. One encoder per
+  invocation is mandatory on the 7.5 GB host.
+
+### Still open
+
+* **Image encoder is unmeasured under this sweep.** It collapsed independently
+  under `--quantize-all` (0.0137). ViT-B/16's vision tower is also known to carry
+  massive activations, so `Add` is the natural first suspect — but that is an
+  assumption, not a measurement, and the sweep must be repeated for it.
+* **Per-op (not per-op-type) scope** would allow quantizing the benign mask/early
+  adds while keeping only `node_add_2`…`node_add_24` float. Low expected value:
+  those adds are cheap elementwise ops.
+* **Real fixes for the massive activations**, if `Add` in int8 is ever needed:
+  SmoothQuant-style migration of the outlier scale into adjacent weights, or int16
+  activations for the residual adds only.
+
+---
+
+## PHASE 2 — IMAGE-ENCODER SWEEP + PAIR MATRIX (RAN 2026-08-11)
+
+Closes the "image encoder is unmeasured under this sweep" item left open above.
+All numbers below were produced with an in-process FP32/FP32 reference, which
+reproduced **0.8728** on every run — and the `defscope` pair reproduced Phase 0's
+**0.8610** exactly, so the harness is validated against a known point.
+
+### Result 3 — the image encoder's killer is `LayerNormalization`, not `Add`
+
+The assumption recorded above ("`Add` is the natural first suspect" for the image
+tower) was **not** what the measurement found.
+
+| Image-encoder scope | Recall@10 (INT8 img + FP32 txt) |
+|---|---|
+| FP32 | 0.8728 |
+| `defscope` = `Conv, ConvTranspose, MatMul, Gemm` | **0.8743** (+0.0015) |
+| `defscope + Softmax` | **0.8746** (+0.0018) — best image scope |
+| `defscope + LayerNormalization` | **0.0601** — collapsed |
+| `defscope + LayerNormalization, Softmax` (`bestscope`) | 0.0458 — collapsed |
+
+`LayerNormalization` alone reproduces the full collapse; `Softmax` is free and
+very slightly beneficial. Two builds resolved it.
+
+**Note the per-encoder asymmetry.** `LayerNormalization + Softmax` is the *best*
+text scope (0.8592) and a *fatal* image scope (0.0458). There is no single
+op-type scope that is optimal for both encoders — scope must be chosen per tower.
+
+### Result 4 — per-encoder bests do NOT compose into the best pair
+
+Full 2x2 of both-encoders-INT8 (the only configuration that actually ships):
+
+| image \ text | `defscope` (0.8522 solo) | `bestscope` (0.8592 solo) |
+|---|---|---|
+| **`defscope`** (0.8743 solo) | **0.8610** | 0.8592 |
+| **`addsoftmax`** (0.8746 solo) | 0.8589 | 0.8496 |
+
+Combining each tower's individually-best scope (`addsoftmax` + `bestscope`) gives
+**0.8496 — the worst of the four**, despite both encoders scoring their highest in
+isolation. `defscope`/`defscope`, where *neither* tower is individually best, wins.
+
+This extends correction #3 above: errors are not merely super-additive within an
+encoder, they are **anti-correlated across encoders**. Solo-encoder scores are not
+a valid selection signal for the shipped pair; only the pair can be optimized.
+
+**Caveat on resolution.** The four pairs span 0.8496–0.8610 on 56 images / 211
+prompts. One image's worth of Recall@10 is ~0.018, so the top three pairs sit
+inside a single image of each other and should be treated as tied. The honest
+reading is *not* "defscope is better" but **"scope choice among these four barely
+moves accuracy — so choose on latency."**
+
+### Result 5 — the range/step explanation does NOT transfer to LN (negative result)
+
+The `Add` collapse was explained by a residual-stream range of `[-264, +396]`
+giving step 2.59. The same tool aimed at the image encoder's LN outputs does
+**not** produce an equivalent story:
+
+| Encoder | LN output span (min / median / max) | LN step (min / median / max) | LN in int8? |
+|---|---|---|---|
+| Image (`addln`, 26 LNs) | 8.1 / 51.0 / 109.9 | 0.032 / 0.200 / 0.431 | **collapses (0.0601)** |
+| Text (`bestscope`, 25 LNs) | 39.2 / 55.8 / 199.0 | 0.154 / 0.219 / 0.780 | **fine (0.8592)** |
+
+The text encoder's LN ranges are **wider** and its steps **coarser** than the
+image encoder's, yet the text encoder tolerates LN quantization and the image
+encoder does not. Calibrated range therefore does not explain this collapse, and
+no mechanism is claimed here. The localization (image encoder + LN) is measured
+and solid; the *why* is open.
+
+This is the eighth artifact-inspection hypothesis to fail, and it reinforces the
+methodology note above: **scope manipulation localizes, inspection often
+rationalizes.** The `Add`/massive-activation story remains well-supported for the
+text encoder — it is simply not a general law.
+
+### Practical position
+
+* **Ship `defscope` on both encoders (0.8610)** — unchanged from Phase 0. Phase 2
+  found no accuracy gain, which is itself a useful result: the scope question is
+  now closed on the accuracy axis.
+* **The open question is latency, not accuracy.** The four pairs are accuracy-tied
+  but differ in how many ops run in int8. `addsoftmax`/`bestscope` (0.8496) pushes
+  the most ops into int8 and has the fewest dequant/requant boundaries; if the
+  earlier ORT observation (INT8 39.1 ms *slower* than FP32 31.4 ms) is caused by
+  float-op boundaries, that pair is the one that would fix it — at a cost of
+  ~0.011 Recall@10, i.e. within noise. **Only an XR2 device run decides this**,
+  and that is the recommended next action.
+* `LayerNormalization` must stay float in the image encoder under any scope.
+
+### Tooling notes
+
+* Per-encoder bisection builds need a driver: `--sweep` discovery requires image
+  and text artifacts to share one tag, so it cannot score an image-only build nor
+  a **mixed-tag pair** (which the per-tower-optimal build necessarily is).
+  Scratchpad drivers `score_image_build.py` / `score_pair.py` reuse the module's
+  own `load_images()` / `load_text_tokens()` / `run_inference()` and compute the
+  FP32 reference in-process. If mixed-tag pairs become the shipping configuration,
+  this belongs in `inference_onnx.py` as `--image-int8-tag` / `--text-int8-tag`.
+* `--variant` overrides the output tag and is what keeps bisection builds from
+  overwriting each other (`addln`, `addsoftmax`).
+* **Peak RSS for an image-encoder build was 3.31 GB** — well under the 4.47–5.17 GB
+  recorded for the Phase 1 text builds, and comfortable on the 7.5 GB host.
+  Evaluation peaks at only ~1.5 GB. The crashes were confined to quantization
+  builds, and `--encoder image|text` (never `both`) remains the rule.
+* Environment: the runnable env is the conda env at `/mnt/rama_ml/conda_envs/lpcvc`
+  (AIMET 2.34, ORT 1.23.2, clip, qai_hub); `base`/`ml_base` lack AIMET and clip.
+  `src/common/config.py` still defaults to Windows paths, so every invocation
+  needs `LPCVC_DATA_DIR=/mnt/rama_ml/data/lpcvc_track1_sample_data`. Worth fixing
+  in config.py — the default is dead on this host.
+
+### Still open (updated)
+
+* **Why LN is fatal in the vision tower but benign in the text tower.** Ranges are
+  ruled out. Next probe would be per-op LN scope (is it one LN — e.g. `ln_post`
+  feeding the projection — or all 26?), which needs per-op rather than per-op-type
+  exclusion.
+* **XR2 latency for the accuracy-tied scopes** — the actual decision-maker.
+* Per-op scope and SmoothQuant/int16 remedies, as listed in Phase 1.

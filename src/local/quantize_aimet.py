@@ -189,26 +189,44 @@ def resolve_config_file(spec):
     )
 
 
-def configure_quantizers(sim, allowed_op_types, encoder_type):
+def configure_quantizers(sim, allowed_op_types, encoder_type, denied_op_types=None):
     """
-    Disable quantizers on every op whose type is not in `allowed_op_types`.
+    Restrict which ops keep their quantizers. Two mutually exclusive modes:
 
-    Leaves the compute-heavy Conv/MatMul/Gemm ops (weights + outputs) quantized
-    so the model still gets the int8 speedup, while elementwise/normalization/
-    softmax tensors stay in float.
+    * **allow-list** (`allowed_op_types`) — disable quantizers on every op whose
+      type is NOT listed. This is the production default: it leaves the
+      compute-heavy Conv/MatMul/Gemm ops quantized while elementwise /
+      normalization / softmax tensors stay in float.
+
+    * **deny-list** (`denied_op_types`) — start from fully-quantized and disable
+      only the listed op types. This is the leave-one-out bisection mode used to
+      find what `--quantize-all` actually breaks: `--quantize-all` scores 0.0000,
+      so returning one op type at a time to float localizes the culprit without
+      guessing.
     """
+    if (allowed_op_types is None) == (denied_op_types is None):
+        raise ValueError("pass exactly one of allowed_op_types / denied_op_types")
+
     kept, disabled = 0, 0
     for op in sim.connected_graph.get_all_ops().values():
         in_q, out_q, param_q = sim.get_op_quantizers(op)
         quantizers = list(in_q) + list(out_q) + list(param_q.values())
-        if op.type in allowed_op_types:
+        if denied_op_types is None:
+            drop = op.type not in allowed_op_types
+        else:
+            drop = op.type in denied_op_types
+        if not drop:
             kept += sum(1 for q in quantizers if q is not None and q.enabled)
             continue
         for q in quantizers:
             if q is not None and q.enabled:
                 q.enabled = False
                 disabled += 1
-    print(f"    Quantizers: {kept} kept ({', '.join(allowed_op_types)}), {disabled} disabled")
+    if denied_op_types is None:
+        scope = f"kept only {', '.join(allowed_op_types)}"
+    else:
+        scope = f"all EXCEPT {', '.join(denied_op_types)}"
+    print(f"    Quantizers: {kept} kept ({scope}), {disabled} disabled")
     return kept
 
 
@@ -297,6 +315,7 @@ def quantize_encoder(
     skip_cle: bool = False,
     quant_op_types=DEFAULT_QUANT_OP_TYPES,
     config_file: str = None,
+    exclude_op_types=None,
 ) -> None:
     """
     Quantize a CLIP encoder using AIMET's QuantizationSimModel.
@@ -310,6 +329,8 @@ def quantize_encoder(
         skip_cle: If True, skip cross-layer equalization
         quant_op_types: Op types that keep their quantizers. None quantizes
             everything (AIMET default — known to break CLIP, see notes above).
+        exclude_op_types: Leave-one-out bisection mode. Quantize everything
+            EXCEPT these op types. Mutually exclusive with quant_op_types.
         config_file: Path to an AIMET quantsim config JSON. None uses AIMET's
             generic default_config.json (per-tensor weights, 2 op_type overrides,
             5 supergroups) — which is NOT the target hardware's behaviour. See
@@ -352,7 +373,11 @@ def quantize_encoder(
 
     # Step 3b: Restrict which ops are quantized (must happen before calibration
     # so disabled quantizers never gather stats)
-    if quant_op_types:
+    if exclude_op_types:
+        print(f"[{encoder_type.upper()} Encoder] Bisection: quantizing all EXCEPT "
+              f"{', '.join(exclude_op_types)}...")
+        configure_quantizers(sim, None, encoder_type, denied_op_types=exclude_op_types)
+    elif quant_op_types:
         print(f"[{encoder_type.upper()} Encoder] Restricting quantization scope...")
         configure_quantizers(sim, quant_op_types, encoder_type)
     else:
@@ -423,6 +448,16 @@ if __name__ == "__main__":
         ),
     )
     parser.add_argument(
+        "--exclude-op-types", default=None,
+        help=(
+            "LEAVE-ONE-OUT BISECTION. Quantize everything EXCEPT these op types "
+            "(comma-separated), e.g. --exclude-op-types Gather. Starts from the "
+            "--quantize-all graph, which scores 0.0000, and returns the listed "
+            "types to float to localize what full quantization breaks. Mutually "
+            "exclusive with --quant-op-types."
+        ),
+    )
+    parser.add_argument(
         "--quant-op-types", default=",".join(DEFAULT_QUANT_OP_TYPES),
         help="Comma-separated op types that keep their quantizers.",
     )
@@ -477,7 +512,18 @@ if __name__ == "__main__":
     # Filename tag consumed by inference_onnx.py's discovery regex:
     #   {image,text}_encoder{slug}_int8_{format}_{activation}.onnx
     # We use format="aimet" and activation=<preprocessing variant>.
-    quant_op_types = None if args.quantize_all else tuple(
+    exclude_op_types = None
+    if args.exclude_op_types:
+        if args.quantize_all:
+            raise SystemExit(
+                "Error: --exclude-op-types already implies quantize-everything-else; "
+                "drop --quantize-all."
+            )
+        exclude_op_types = tuple(
+            t.strip() for t in args.exclude_op_types.split(",") if t.strip()
+        )
+
+    quant_op_types = None if (args.quantize_all or exclude_op_types) else tuple(
         t.strip() for t in args.quant_op_types.split(",") if t.strip()
     )
 
@@ -490,6 +536,11 @@ if __name__ == "__main__":
             act_name += "nobnf"
         if args.quantize_all:
             act_name += "allops"
+        if exclude_op_types:
+            # Bisection runs are all quantize-everything-except-X, so the tag has
+            # to name X or each run overwrites the last one's artifact.
+            excl = "".join(t.lower() for t in exclude_op_types)
+            act_name += f"allopsno{excl}"
 
     config_path = resolve_config_file(args.config_file)
 
@@ -514,7 +565,10 @@ if __name__ == "__main__":
     print(f"AIMET INT8 Quantization — {model_name}")
     print(f"  BN Folding: {not args.skip_bnf}")
     print(f"  CLE: {not args.skip_cle}")
-    print(f"  Quantized ops: {'ALL' if quant_op_types is None else ', '.join(quant_op_types)}")
+    if exclude_op_types:
+        print(f"  Quantized ops: ALL EXCEPT {', '.join(exclude_op_types)}  (bisection)")
+    else:
+        print(f"  Quantized ops: {'ALL' if quant_op_types is None else ', '.join(quant_op_types)}")
     print(f"  Config file: {config_path or 'AIMET default (generic, per-tensor)'}")
     print(f"  Encoder(s): {args.encoder}")
     print(f"  Output tag: int8_{fmt_name}_{act_name}")
@@ -543,6 +597,7 @@ if __name__ == "__main__":
             skip_cle=args.skip_cle,
             quant_op_types=quant_op_types,
             config_file=config_path,
+            exclude_op_types=exclude_op_types,
         )
         del image_calib_list
 
@@ -558,6 +613,7 @@ if __name__ == "__main__":
             skip_cle=args.skip_cle,
             quant_op_types=quant_op_types,
             config_file=config_path,
+            exclude_op_types=exclude_op_types,
         )
         del text_calib_list
 
