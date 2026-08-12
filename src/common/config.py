@@ -19,13 +19,25 @@ On Linux/Mac use export instead of set:
 import os
 
 # ── Sample dataset (competition data) ────────────────────────────────────────
-# SAMPLE_DATA_DIR = os.environ.get(
-#     "LPCVC_DATA_DIR",
-#     r"/mnt/sandbox/ryara/datasets/lpcvc_track1_sample_data",
-# )
-SAMPLE_DATA_DIR = os.environ.get(
-    "LPCVC_DATA_DIR",
+# LPCVC_DATA_DIR wins if set. Otherwise probe the known checkout locations and
+# take the first that exists, so no invocation needs an env-var prefix on a
+# machine where the data sits in one of them.
+_SAMPLE_DATA_CANDIDATES = [
+    "/mnt/rama_ml/data/lpcvc_track1_sample_data",
+    "/mnt/sandbox/ryara/datasets/lpcvc_track1_sample_data",
     r"C:\rama\projects\data\lpcvc_track1_sample_data",
+]
+
+
+def _first_existing(candidates, fallback):
+    for c in candidates:
+        if os.path.isdir(c):
+            return c
+    return fallback
+
+
+SAMPLE_DATA_DIR = os.environ.get("LPCVC_DATA_DIR") or _first_existing(
+    _SAMPLE_DATA_CANDIDATES, _SAMPLE_DATA_CANDIDATES[0]
 )
 IMAGE_DIR = os.path.join(SAMPLE_DATA_DIR, "images")
 IMG_LIST  = os.path.join(SAMPLE_DATA_DIR, "img_list.csv")
@@ -54,7 +66,10 @@ DIAGNOSTICS_DIR = os.environ.get("LPCVC_DIAGNOSTICS_DIR",  os.path.join(_REPO_RO
 CHECKPOINTS_DIR = os.environ.get("LPCVC_CHECKPOINTS_DIR",  os.path.join(_REPO_ROOT, "lora_checkpoints"))
 
 # ── QAI Hub ───────────────────────────────────────────────────────────────────
-DEVICE_NAME              = os.environ.get("QAI_HUB_DEVICE",         "XR2 Gen 2 (Proxy)")
+# Target device. Switched from "XR2 Gen 2 (Proxy)" to the Galaxy S22 family:
+# Snapdragon 8 Gen 1 / sm8450, Hexagon v69 — the same HTP generation the AIMET
+# htp_v69 quantsim config targets. Override with QAI_HUB_DEVICE or --device.
+DEVICE_NAME              = os.environ.get("QAI_HUB_DEVICE",         "Samsung Galaxy S22 (Family)")
 DEFAULT_IMAGE_DATASET_ID = os.environ.get("QAI_HUB_IMAGE_DATASET",  "d91y6v3n9")
 DEFAULT_TEXT_DATASET_ID  = os.environ.get("QAI_HUB_TEXT_DATASET",   "d74j38p07")
 
@@ -62,6 +77,11 @@ DEFAULT_TEXT_DATASET_ID  = os.environ.get("QAI_HUB_TEXT_DATASET",   "d74j38p07")
 # Override via env vars or CLI --calib-source / --calib-samples
 CALIBRATION_SOURCE    = os.environ.get("LPCVC_CALIB_SOURCE",    "coco")  # sample | coco | flickr30k
 CALIBRATION_N_SAMPLES = int(os.environ.get("LPCVC_CALIB_N_SAMPLES", "500"))
+
+# ── Competition constraints ───────────────────────────────────────────────────
+# Hard threshold: image + text encoder combined. Recall@10 is only scored if the
+# submission comes in under this.
+LATENCY_BUDGET_MS = float(os.environ.get("LPCVC_LATENCY_BUDGET_MS", "35"))
 
 # ── CLIP model ────────────────────────────────────────────────────────────────
 CLIP_MEAN     = (0.48145466, 0.4578275,  0.40821073)
