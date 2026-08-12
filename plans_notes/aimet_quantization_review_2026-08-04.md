@@ -1282,3 +1282,89 @@ text encoder — it is simply not a general law.
   exclusion.
 * **XR2 latency for the accuracy-tied scopes** — the actual decision-maker.
 * Per-op scope and SmoothQuant/int16 remedies, as listed in Phase 1.
+
+---
+
+## DEVICE-RUN BENCHMARK REFERENCE (prepared 2026-08-11, not yet run)
+
+Baseline table to check the QAI Hub device run against. Every number below is
+**local ORT on the 56-image / 211-prompt sample set**, measured in Phase 0–2
+against an in-process FP32/FP32 reference of 0.8728.
+
+Target device changed: **Samsung Galaxy S22 family** (Snapdragon 8 Gen 1,
+sm8450, Hexagon **v69**), not XR2 Gen 2. Note v69 is the same HTP generation the
+AIMET `htp_v69` quantsim config names — which Phase 0 Result 2 measured as
+**inert**, so it remains unused. Latency budget is unchanged at 35 ms combined.
+
+### Scope definitions
+
+| Tag | Op types quantized |
+|---|---|
+| `defscope` | `Conv, ConvTranspose, MatMul, Gemm` |
+| `addsoftmax` | `defscope + Softmax` |
+| `bestscope` | `defscope + LayerNormalization, Softmax` |
+
+### Reference points
+
+| Variant | Recall@10 |
+|---|---|
+| PyTorch FP32 (local) | 0.8805 |
+| ONNX FP32 (local ORT) | **0.8728** ← the reference the device run must reproduce |
+
+### Solo-encoder numbers (context only — NOT a selection signal)
+
+| Image scope (INT8 img + FP32 txt) | R@10 | | Text scope (FP32 img + INT8 txt) | R@10 |
+|---|---|---|---|---|
+| `defscope` | 0.8743 | | `defscope` | 0.8522 |
+| `addsoftmax` | **0.8746** | | `bestscope` | **0.8592** |
+| `+ LayerNormalization` | 0.0601 ✗ | | | |
+
+Phase 2 Result 4: per-encoder bests do **not** compose. Score the pair, never the
+towers.
+
+### The four pairs — both encoders INT8 (this is what ships)
+
+| # | image tag | text tag | local R@10 | vs FP32 ONNX | device R@10 | img ms | txt ms | total ms |
+|---|---|---|---|---|---|---|---|---|
+| 1 | `defscope` | `defscope` | **0.8610** | −0.0118 | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
+| 2 | `defscope` | `bestscope` | 0.8592 | −0.0136 | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
+| 3 | `addsoftmax` | `defscope` | 0.8589 | −0.0139 | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
+| 4 | `addsoftmax` | `bestscope` | 0.8496 | −0.0232 | _tbd_ | _tbd_ | _tbd_ | _tbd_ |
+
+**Read this table as tied on accuracy.** The spread is 0.0114; one image is worth
+~0.018 on a 56-image set, so all four sit inside a single image of each other.
+Pair 4 is the *most* int8 (fewest float boundaries) and pair 1 the least.
+
+### What the device run is actually testing
+
+1. **Does device Recall@10 track local ORT?** A per-pair gap of more than ~0.02
+   means the QNN compile path is not reproducing the AIMET encodings, and the
+   local ranking above cannot be trusted for selection.
+2. **Which pair is fastest?** The real question. If the earlier ORT observation
+   (INT8 39.1 ms *slower* than FP32 31.4 ms) is caused by dequant/requant
+   boundaries, pair 4 should be fastest and pair 1 slowest. If latency is instead
+   flat across all four, the boundary hypothesis is wrong and the ~0.011 accuracy
+   of pair 1 is free — ship pair 1.
+3. **Does anything beat FP32's ~31 ms at all?** If no INT8 pair beats FP32 on
+   device, the whole INT8 line is a dead end for latency and the effort should
+   move to ViT-L/14 or fine-tuning.
+
+Prediction to record before the run: latency ordering 4 < 3 ≈ 2 < 1, all under
+FP32. Writing it down so the result can falsify it.
+
+### Commands
+
+```bash
+# validate plumbing — submits nothing
+python src/platform/run_on_device.py --precision int8-aimet --sweep-pairs --dry-run
+
+# the real sweep — 4 pairs x (2 compile + 2 profile + 2 inference) = 24 jobs
+python src/platform/run_on_device.py --precision int8-aimet --sweep-pairs
+
+# FP32 baseline on the same device, for the comparison the table needs
+python src/platform/run_on_device.py --precision fp32
+```
+
+Results are written to `profile_logs/aimet_pair_sweep_<stamp>.txt`. All four
+artifacts are already on disk; datasets `d91y6v3n9` / `d74j38p07` were verified
+live on 2026-08-11, so no re-upload is needed.
