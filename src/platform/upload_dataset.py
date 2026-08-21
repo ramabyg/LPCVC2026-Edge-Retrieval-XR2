@@ -20,8 +20,8 @@ def process_image(image_path):
     img = preprocess(Image.open(image_path).convert("RGB"))  # [3, 224, 224]
     return img.numpy()[np.newaxis, :]  # [1, 3, 224, 224]
 
-image_folder = "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\images"
-img_list_csv = "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\img_list.csv"
+image_folder = "/mnt/rama_ml/data/lpcvc_track1_sample_data/images"
+img_list_csv = "/mnt/rama_ml/data/lpcvc_track1_sample_data/img_list.csv"
 
 # Load images in img_list.csv row order — must match evaluate_track1() expectations
 df_img = pd.read_csv(img_list_csv)
@@ -35,7 +35,7 @@ print(f"First 3 filenames: {image_filenames[:3]}")  # Verify CSV order
 print(qai_hub.upload_dataset({"image": input_image}))
 
 # TODO: Load txt CSV
-csv_path = "C:\\rama\\projects\\data\\lpcvc_track1_sample_data\\txt_list.csv"
+csv_path = "/mnt/rama_ml/data/lpcvc_track1_sample_data/txt_list.csv"
 df = pd.read_csv(csv_path)
 
 # Get unique text prompts in order from the second column, drop NaN

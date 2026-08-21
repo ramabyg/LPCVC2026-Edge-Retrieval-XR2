@@ -53,6 +53,22 @@ ensure_output_dirs()
 # 0.8496-0.8610; one image is worth ~0.018 on a 56-image set, so they are
 # ACCURACY-TIED and the device latency decides which one ships.
 #
+# DEVICE RUNTIME (2026-08-12): these builds MUST be compiled to a QNN context
+# binary, not a DLC. Every scope-restricted build is a MIXED float/int8 graph
+# (LayerNorm / Add / Softmax stay float), and the HTP cannot compose a mixed
+# graph out of a DLC: the compile job succeeds, then every profile and inference
+# job dies with
+#     Failed to call QnnModel_composeGraphsFromDlc: MODEL_GRAPH_ERROR
+# which is what made the 2026-08-12 sweep return four bare "job failed" rows.
+# Measured on the image encoder, Galaxy S22:
+#   defscope        + qnn_dlc            -> MODEL_GRAPH_ERROR   (jp437xy25)
+#   defscope        + FLOAT16 fallback   -> MODEL_GRAPH_ERROR   (jpv78z7rp)
+#   defscope        + qnn_context_binary -> 55.93 ms            (jpeyq4685)
+#   all-ops int8    + qnn_dlc            -> 21.26 ms            (jgo8xe8kp)
+# Per-channel MatMul weights were ruled out: folding them to per-tensor still
+# gives MODEL_GRAPH_ERROR under qnn_dlc (jgnk4r6rg, jglldev8g). The float ops
+# are also expensive — see the 55.93 ms above against 20.16 ms for FP32.
+#
 # defscope    = Conv, ConvTranspose, MatMul, Gemm
 # addsoftmax  = defscope + Softmax        (image only; best solo image scope)
 # bestscope   = defscope + LayerNormalization, Softmax  (text only)
@@ -112,6 +128,17 @@ parser.add_argument(
     help=f"AIMET variant tag for the text encoder (default: {DEFAULT_AIMET_TEXT_TAG})",
 )
 parser.add_argument(
+    "--aimet-runtime", default="qnn_context_binary",
+    choices=["qnn_context_binary", "qnn_dlc"],
+    help=(
+        "Target runtime for --precision int8-aimet (default: qnn_context_binary). "
+        "The scope-restricted AIMET builds are MIXED float/int8 graphs, and a "
+        "mixed graph cannot be composed from a DLC on the HTP — every profile and "
+        "inference job dies with 'QnnModel_composeGraphsFromDlc: MODEL_GRAPH_ERROR' "
+        "even though the compile job succeeds. See the note above run_once()."
+    ),
+)
+parser.add_argument(
     "--sweep-pairs", action="store_true",
     help=(
         "Run every (image, text) AIMET tag pair in PAIR_MATRIX and print one "
@@ -150,6 +177,7 @@ args = parser.parse_args()
 # ---------------------------------------------------------------------------
 device_name = args.device or DEVICE_NAME
 TARGET_DEVICE = qai_hub.Device(device_name)
+aimet_runtime = args.aimet_runtime
 
 # Resolve --int8 legacy flag into --precision
 if args.precision is None:
@@ -209,13 +237,32 @@ def clean_value_info(model):
 
 def get_compile_options(precision):
     """Return QAI Hub compile options based on precision mode."""
-    base = "--target_runtime qnn_dlc --truncate_64bit_io"
+    base = f"--target_runtime {aimet_runtime if precision == 'int8-aimet' else 'qnn_dlc'}"
+    base += " --truncate_64bit_io"
     if precision == "fp16":
         return f"{base} --qnn_options default_graph_htp_precision=FLOAT16"
     elif precision == "int8-compile":
         return f"{base} --quantize_full_type int8"
-    else:  # fp32, int8-local (QDQ ONNX already quantized)
+    else:  # fp32, int8-local, int8-aimet (QDQ ONNX already quantized)
         return base
+
+
+class JobFailure(Exception):
+    """A QAI Hub job failed. Carries the message so the results table can show it.
+
+    Previously every failure path called sys.exit(1) and --sweep-pairs recorded a
+    bare 'job failed', which threw away the only useful part: WHY. That is how a
+    whole sweep came back with four identical 'job failed' rows and no diagnosis.
+    """
+
+    def __init__(self, stage, job, message):
+        super().__init__(f"{stage} {job.job_id}: {message}")
+        self.stage = stage
+        self.job_id = job.job_id
+        self.message = message
+
+    def short(self):
+        return f"{self.stage} failed ({self.job_id}): {self.message.splitlines()[0][:70]}"
 
 
 def compile_and_wait(model, input_specs, precision, calibration_data=None):
@@ -233,7 +280,7 @@ def compile_and_wait(model, input_specs, precision, calibration_data=None):
     status = job.get_status()
     if status.failure:
         print(f"  Compile FAILED: {status.message}")
-        sys.exit(1)
+        raise JobFailure("compile", job, status.message)
     print(f"  Compile done: {job.job_id}")
     return job
 
@@ -266,7 +313,7 @@ def quantize_and_compile(model, input_specs, precision, calibration_data):
     status = optimize_job.get_status()
     if status.failure:
         print(f"  Optimize FAILED: {status.message}")
-        sys.exit(1)
+        raise JobFailure("optimize", optimize_job, status.message)
     print(f"  Optimize done: {optimize_job.job_id}")
     optimized_model = optimize_job.get_target_model()
 
@@ -284,7 +331,7 @@ def quantize_and_compile(model, input_specs, precision, calibration_data):
     status = quant_job.get_status()
     if status.failure:
         print(f"  Quantize FAILED: {status.message}")
-        sys.exit(1)
+        raise JobFailure("quantize", quant_job, status.message)
     print(f"  Quantize done: {quant_job.job_id}")
     quantized_model = quant_job.get_target_model()
 
@@ -301,7 +348,7 @@ def quantize_and_compile(model, input_specs, precision, calibration_data):
     status = compile_job.get_status()
     if status.failure:
         print(f"  Compile FAILED: {status.message}")
-        sys.exit(1)
+        raise JobFailure("compile", compile_job, status.message)
     print(f"  Compile done: {compile_job.job_id}")
     return compile_job
 
@@ -327,18 +374,22 @@ def run_inference(compiled_model, dataset):
     status = job.get_status()
     if status.failure:
         print(f"  Inference FAILED: {status.message}")
-        return None
+        raise JobFailure("inference", job, status.message)
     return job.download_output_data()["output_0"]
 
 
 def print_profile_summary(name, profile_job):
-    """Print the profile result and return latency in ms (None if unavailable)."""
+    """Print the profile result and return latency in ms.
+
+    Returns (ms, error). A profile failure is not fatal — Recall@10 is still
+    worth having — but the reason travels back so the table can show it.
+    """
     print(f"\n--- {name} profile ---")
     profile_job.wait()
     status = profile_job.get_status()
     if status.failure:
         print(f"  Profile job failed: {status.message}")
-        return None
+        return None, JobFailure("profile", profile_job, status.message).short()
     try:
         data = profile_job.download_profile()
         # QAI Hub SDK may return a list (one entry per graph); unwrap if so
@@ -353,18 +404,18 @@ def print_profile_summary(name, profile_job):
         if total_us is not None:
             total_ms = total_us / 1000.0
             print(f"  Estimated latency: {total_ms:.2f} ms")
-            return total_ms
+            return total_ms, None
         # Fallback: sum layer times
         layers = data.get("execution_detail", {}).get("layers", [])
         if layers:
             total_us = sum(l.get("execution_time", 0) for l in layers)
             print(f"  Total layer time:  {total_us / 1000:.2f} ms  ({len(layers)} layers)")
-            return total_us / 1000.0
+            return total_us / 1000.0, None
         print(f"  Profile job: {profile_job.job_id} (check QAI Hub dashboard)")
     except Exception as e:
         print(f"  Could not parse profile data: {e}")
         print(f"  Profile job ID: {profile_job.job_id}")
-    return None
+    return None, "profile data unparseable"
 
 
 # ---------------------------------------------------------------------------
@@ -373,8 +424,9 @@ def print_profile_summary(name, profile_job):
 def run_once(image_onnx_path, text_onnx_path, label):
     """Compile, profile and score one (image, text) encoder pair.
 
-    Returns a dict of results. Raises SystemExit on a job failure, which
-    --sweep-pairs catches so one bad pair does not abandon the others.
+    Returns a dict of results. Raises JobFailure on a compile/inference failure,
+    which --sweep-pairs catches (with the message) so one bad pair does not
+    abandon the others. A profile failure is recorded, not raised.
     """
     print("\n" + "#" * 70)
     print(f"# {label}")
@@ -430,19 +482,16 @@ def run_once(image_onnx_path, text_onnx_path, label):
     print("Text encoder:")
     text_output  = run_inference(txt_compiled_model, text_dataset)
 
-    if image_output is None or text_output is None:
-        print("\nInference failed — cannot compute Recall@10.")
-        sys.exit(1)
-
     # --- Step 4: Recall@10 ---
     print("\n=== Recall@10 ===")
     recall = evaluate_track1(image_output, text_output, TXT_LIST, IMG_LIST)
     print(f"Recall@10: {recall:.4f}")
 
     # --- Step 5: Profile results (ran in parallel with inference) ---
-    img_ms = print_profile_summary("Image encoder", img_profile_job)
-    txt_ms = print_profile_summary("Text encoder",  txt_profile_job)
+    img_ms, img_profile_err = print_profile_summary("Image encoder", img_profile_job)
+    txt_ms, txt_profile_err = print_profile_summary("Text encoder",  txt_profile_job)
     total_ms = None if img_ms is None or txt_ms is None else img_ms + txt_ms
+    profile_err = img_profile_err or txt_profile_err
 
     # --- Summary ---
     print("\n" + "=" * 50)
@@ -469,6 +518,7 @@ def run_once(image_onnx_path, text_onnx_path, label):
         "txt_compile_job": txt_compile_job.job_id,
         "img_profile_job": img_profile_job.job_id,
         "txt_profile_job": txt_profile_job.job_id,
+        "profile_error": profile_err,
     }
 
 
@@ -515,6 +565,8 @@ def write_results_table(results, path):
         verdict = ""
         if r["total_ms"] is not None:
             verdict = "PASS" if r["total_ms"] <= LATENCY_BUDGET_MS else "OVER BUDGET"
+        if not verdict and r.get("profile_error"):
+            verdict = r["profile_error"]
         lines.append(f"  {r['label']:<30} {local_s:>10} {r['recall']:>12.4f} "
                      f"{img_s:>8} {txt_s:>8} {tot_s:>9}  {verdict}")
     lines.append("")
@@ -585,10 +637,11 @@ if args.sweep_pairs:
         label = f"img={image_tag} txt={text_tag}"
         try:
             r = run_once(img_path, txt_path, label)
-        except SystemExit:
-            # One failed pair must not abandon the remaining three.
-            print(f"\n!! Pair {label} failed — continuing with the rest.")
-            r = {"label": label, "error": "job failed"}
+        except JobFailure as e:
+            # One failed pair must not abandon the remaining three — but keep the
+            # reason, which is the whole point of running the sweep unattended.
+            print(f"\n!! Pair {label} failed: {e}  — continuing with the rest.")
+            r = {"label": label, "error": e.short()}
         r["local_recall"] = PAIR_MATRIX[(image_tag, text_tag)]
         results.append(r)
 
@@ -602,7 +655,11 @@ else:
     else:
         label = f"{args.model} {args.precision}"
         local_recall = None
-    result = run_once(IMAGE_ONNX_PATH, TEXT_ONNX_PATH, label)
+    try:
+        result = run_once(IMAGE_ONNX_PATH, TEXT_ONNX_PATH, label)
+    except JobFailure as e:
+        print(f"\n!! {label} failed: {e}")
+        result = {"label": label, "error": e.short()}
     result["local_recall"] = local_recall
     out = os.path.join(PROFILE_LOG_DIR, f"on_device_{args.precision}_{stamp}.txt")
     write_results_table([result], out)

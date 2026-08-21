@@ -70,8 +70,8 @@ CHECKPOINTS_DIR = os.environ.get("LPCVC_CHECKPOINTS_DIR",  os.path.join(_REPO_RO
 # Snapdragon 8 Gen 1 / sm8450, Hexagon v69 — the same HTP generation the AIMET
 # htp_v69 quantsim config targets. Override with QAI_HUB_DEVICE or --device.
 DEVICE_NAME              = os.environ.get("QAI_HUB_DEVICE",         "Samsung Galaxy S22 (Family)")
-DEFAULT_IMAGE_DATASET_ID = os.environ.get("QAI_HUB_IMAGE_DATASET",  "d91y6v3n9")
-DEFAULT_TEXT_DATASET_ID  = os.environ.get("QAI_HUB_TEXT_DATASET",   "d74j38p07")
+DEFAULT_IMAGE_DATASET_ID = os.environ.get("QAI_HUB_IMAGE_DATASET",  "d9em5ngv2")
+DEFAULT_TEXT_DATASET_ID  = os.environ.get("QAI_HUB_TEXT_DATASET",   "d7znj16y7")
 
 # ── Calibration data (for compile-time INT8 quantization) ────────────────────
 # Override via env vars or CLI --calib-source / --calib-samples
