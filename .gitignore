@@ -19,3 +19,6 @@ dist/
 *.tar.xz
 *.7z
 *.gz
+# Agent-local files (machine-specific paths, not shared)
+CLAUDE.md
+.claude/
